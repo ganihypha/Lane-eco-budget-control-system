@@ -1,8 +1,8 @@
 # Lane-Eco Budget Control System
 
-**Version:** 1.2.1 | **Build Session:** HUB-19 | **Status:** ✅ LIVE-VERIFIED
+**Version:** 1.3.0 | **Build Session:** HUB-20 | **Status:** ✅ LIVE-VERIFIED
 
-Internal operational tool for session, lane, ecosystem budget management — with truth-mature Sovereign Source Intake for canonical truth grounding.
+Internal operational tool for session, lane, ecosystem budget management — with truth-mature Sovereign Source Intake and **persistent D1 storage** for canonical truth grounding that survives restarts and redeployment.
 
 ---
 
@@ -15,7 +15,7 @@ Internal operational tool for session, lane, ecosystem budget management — wit
 
 ---
 
-## Modules (7 total — all LIVE-VERIFIED)
+## Modules (7 total — all LIVE-VERIFIED / 17/17 routes 200 OK)
 
 | Module | Route | Description |
 |---|---|---|
@@ -32,21 +32,27 @@ Internal operational tool for session, lane, ecosystem budget management — wit
 ## Architecture
 
 ```
-Sovereign Source (P1 current-handoff)          ← canonical truth
-         ↓
+Sovereign Source (P1 current-handoff) ← canonical truth
+  ↓
+Sovereign Source Intake (D1 persistent storage)
+  ↓  [persists across restart/redeploy]
+Auto-Restore on Boot (restores P1 from D1 on first request)
+  ↓
 Budget Controller App (P3 — operational truth surface)
-         ↓
+  ↓
 Prompt Bridge (context export + pack generator)
-         ↓
+  ↓
 Master Architect Context Pack (truth-mature, 17+ sections)
-   - Truth Maturity badge: NONE/LOW/MEDIUM/HIGH
-   - Per-field provenance: [canonical_truth P1] / [controller_fallback P3]
-   - Governance frozen: IMMUTABLE label
-   - Extraction completeness summary
-   - Merge diagnostics panel
-         ↓
+  - Truth Maturity badge: NONE/LOW/MEDIUM/HIGH
+  - Storage Mode: persistent (D1) / in-memory / degraded
+  - Active source restored on boot: YES/NO
+  - Per-field provenance: [canonical_truth P1] / [controller_fallback P3]
+  - Governance frozen: IMMUTABLE label
+  - Extraction completeness summary
+  - Merge diagnostics panel
+  ↓
 Master Architect Prompt → AI Dev Executor
-         ↓
+  ↓
 Closeout Ingest → Back to App
 ```
 
@@ -56,102 +62,105 @@ Closeout Ingest → Back to App
 |---|---|---|
 | P1 | current-handoff | Canonical operating truth (highest) |
 | P2 | active-priority | Future priority doc |
-| P3 | live controller | Budget Controller app state |
-| P4 | repo/deploy | GitHub + Cloudflare runtime |
-| P5 | notes | Conversational context (lowest) |
+| P3 | live controller | Budget Controller state (budget, sessions, lanes) |
+| P4 | repo/deploy | Repo + live URL truth |
+| P5 | notes/manual | Low-weight conversational context |
 
 ---
 
-## Sovereign Source Intake — HUB-19 (Truth-Maturity Upgrade)
+## HUB-20 Upgrade (Persistent Storage + Boot Restore)
 
-### Parser Capabilities (Section-Aware)
+### What was upgraded
 
-All session block patterns supported:
-```
-SESSION 4G                    # bare SESSION with alphanumeric ID
-## SESSION 4A                 # heading-based
-## 🚀 SESSION 4B              # emoji + heading
-## SESSION 4A — HUB-18        # compound heading
-HUB-17, HUB-18, SES-01       # hub/ses prefixed
-```
+1. **Persistent Sovereign Intake Storage (D1)**
+   - New `src/lib/sovereign-db.ts` — `SovereignDBAdapter` wrapping D1Database
+   - Stores: source_meta, raw content (capped 64KB), all normalized domains, active_source_id
+   - Graceful fallback: if D1 unavailable → in-memory + honest warning
+   - `migrations/0001_sovereign_intake_store.sql`: 3 tables (records, active pointer, boot log)
+   - Storage mode exposed: `persistent` | `in-memory` | `degraded`
 
-Status normalization:
-```
-STATUS: VERIFIED & CLOSED       → closed_verified
-STATUS: LIVE-VERIFIED           → live_verified
-STATUS: DEPLOYED AND E2E VERIFIED → e2e_verified
-STATUS: BUILD-VERIFIED          → build_verified
-STATUS: VERIFIED AND READY TO CLOSE → verified_ready_to_close
-STATUS: PARTIAL                 → partial
-STATUS: BLOCKED                 → blocked
-```
+2. **Auto-Restore Active P1 Source on Boot**
+   - `SovereignDBAdapter.restoreActiveSource()`: restores most recent valid P1/P2 record
+   - Restore conditions: precedence P1/P2 + confidence != 'none' + payload exists
+   - If restore fails: honest warning state, never silent downgrade
+   - Boot audit: `sovereign_boot_log` records every boot + result
 
-Repo/Deploy truth patterns:
-```
-Repo: <url>
-Production: <url>
-Cloudflare: <host>
-Live URL: <url>
-GitHub: <url>
-build_session: hubXX
-```
+3. **Harden Merge Honesty**
+   - Bridge text pack: `Storage Mode: persistent` + `Restored on boot: YES/NO`
+   - No silent P3 fallback when P1 is present
 
-### Evidence-Based Confidence Scoring (7 Dimensions)
+4. **Clean Up Low-Trust Defaults**
+   - Epoch timestamp guard (never returns `1970-01-01T00:00:00.000Z`)
+   - `controller_fallback_active`: explicit boolean in summary
+   - `truth_authority`: `P1 — current-handoff (doc_id)` OR `controller_fallback (P3) only`
 
-| Dimension | Meaning |
-|---|---|
-| valid_source_type | doc_type = current-handoff or active-priority |
-| session_blocks_found | ≥1 session block extracted |
-| governance_found | Governance Canon section found |
-| repo_deploy_found | Repo/live URL found |
-| next_move_found | Next Locked Move / Suggested scope found |
-| module_truth_found | Module/route table found |
-| conflicts_resolved_cleanly | No unresolved conflicts |
+5. **Summary + Diagnostics Upgrade**
+   - `/health`: +`storage_mode`, +`active_source_restored_on_boot`, version=1.3.0
+   - `/sovereign/api/summary`: +persistence diagnostics
+   - `/sovereign/api/ingest` response: +`persistence{storage_mode, note}`
 
-Scoring: HIGH=5+/7, MEDIUM=3-4/7, LOW=1-2/7, NONE=0/7
-
-### URL Sanitization
-
-- `safe_source_id` = doc_id only, never a URL or endpoint
-- `_restricted_endpoints_redacted: true` always set
-- tokenized/webhook/preview-hash URLs filtered from evidence_links
-- Separated concepts: source_doc_id, canonical_product_repo, canonical_live_url, evidence_urls, (restricted never rendered)
-
-### Fallback Rendering Honesty
-
-Text pack uses explicit labels:
-- `[canonical_truth (P1 — doc-id)]` — field from P1 source
-- `[controller_fallback (P3 hardcoded)]` — P3 fallback applied
-- `unresolved — not found in canonical source` — instead of silent null
-- `FROZEN 🔒 (IMMUTABLE)` — for immutable governance canon
+6. **No LLM Dependency**
+   - All restore/persist logic is deterministic D1 SQL
 
 ---
 
-## How to Use
+## User Guide
 
-1. **Ingest current-handoff**: Open `/sovereign`, paste raw markdown, select `current-handoff (P1)`, click **Ingest & Parse Document**
-2. **Check truth maturity**: Badge shows NONE/LOW/MEDIUM/HIGH + 7-dimension score
-3. **Review extraction completeness**: Grid shows what was/wasn't found
-4. **Check merge diagnostics**: canonical fields vs fallback fields vs unresolved
-5. **Generate pack**: Open `/bridge` → sovereign banner shows maturity → click **Generate Context Pack**
-6. **Copy pack**: Text pack has per-field provenance — safe to paste to AI sessions
-7. **Closeout**: After AI Dev work, ingest closeout at `/bridge` to close the loop
+### Quick Start: Ground the Prompt Bridge in P1 Truth
+
+1. Open https://lane-eco-budget-control.pages.dev/sovereign
+2. Paste your `current-handoff` markdown content in the text area
+3. Set doc_id (e.g. `handoff-2026-04-15`) and type `current-handoff`
+4. Click **Ingest & Parse Document**
+5. Check the **Truth Maturity** badge — target `HIGH` (7/7 dimensions)
+6. Note `Storage Mode: persistent` — source will survive restart
+7. Open `/bridge` → sovereign banner shows maturity badge + storage mode
+8. Click **Generate Context Pack** → pack is truth-mature with provenance labels
+9. Copy text pack → paste at start of new Master Architect session
+
+### Boot Restore Behavior
+
+- After any restart/redeploy, the most recent valid P1 source is automatically restored from D1
+- `active_source_restored_on_boot: true` in health and summary confirms restore happened
+- No manual re-ingest needed after restart
+
+### Degraded Mode
+
+- If no P1 source is ingested, pack will say `controller_fallback (P3) only`
+- This is honest — never silent fallback to P3 while claiming P1 truth
+
+---
+
+## Data Architecture
+
+**Data Models:**
+- Session, Lane, Ecosystem, Decision (controller-owned, P3)
+- SovereignIntakePayload: source_meta, session_truth[], module_truth[], governance_truth, repo_truth, next_move_truth (sovereign-owned, P1/P2)
+
+**Storage Services:**
+- **Cloudflare D1** (`lane-eco-sovereign-store`): Sovereign intake persistence
+- **In-Memory (BudgetStore)**: Budget controller operational state
+
+**Storage Bindings:**
+- `SOVEREIGN_DB` → D1 database `lane-eco-sovereign-store` (ID: `8c11a290-5211-4e26-a8ac-cc2cc0227b24`)
 
 ---
 
 ## Deployment
 
-- **Platform:** Cloudflare Pages (edge-deployed, global)
-- **Status:** ✅ LIVE-VERIFIED
-- **Tech Stack:** Hono + TypeScript + TailwindCSS CDN
-- **Last Updated:** 2026-04-15 (HUB-19)
-- **GitHub:** https://github.com/ganihypha/Lane-eco-budget-control-system
+- **Platform:** Cloudflare Pages
+- **Project:** `lane-eco-budget-control`
+- **Status:** ✅ Active — 17/17 routes LIVE-VERIFIED
+- **Tech Stack:** Hono + TypeScript + TailwindCSS (CDN) + Cloudflare D1
+- **Build:** `npm run build` → `dist/_worker.js` (215 kB)
+- **Last Updated:** 2026-04-15 — HUB-20 persistent storage upgrade
 
-## Sessions History
+## Session History
 
-| Session | Status | Description |
+| Session | Status | Achievement |
 |---|---|---|
-| HUB-16 | LIVE-VERIFIED | Budget Controller MVP greenfield build |
-| HUB-17 | LIVE-VERIFIED | Prompt Bridge v1.0 Phase A+B+C |
-| HUB-18 | LIVE-VERIFIED | Sovereign Source Intake v1.0 |
-| HUB-19 | LIVE-VERIFIED | Truth-Maturity Upgrade — section-aware parser + evidence-based confidence |
+| HUB-16 | ✅ closed | Greenfield build: Dashboard, Sessions, Lanes, Ecosystem, Decisions |
+| HUB-17 | ✅ closed | Prompt Bridge v1.0 — Phase A+B+C, 12/12 routes |
+| HUB-18 | ✅ closed | Sovereign Source Intake v1.0 — 17/17 routes |
+| HUB-19 | ✅ closed | Truth-Maturity Upgrade — section-aware parser, evidence-based scoring |
+| HUB-20 | ✅ live | Persistent D1 Storage + Boot Restore + Harden Merge Honesty |
