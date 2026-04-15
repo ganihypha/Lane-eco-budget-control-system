@@ -1,19 +1,32 @@
 // ============================================================
 // PROMPT BRIDGE — Lane-Eco Budget Control System
 // Phase A: Export Layer
-// Phase B: Pack Generator
+// Phase B: Pack Generator (upgraded: Sovereign-grounded)
 // Phase C: Closeout Ingestion
+// Phase D: Sovereign Source Integration (HUB-18)
 //
-// Spec: Prompt Bridge Doc v1.0 (mster.archi.tect.prompt.finn.nal)
+// Spec: Prompt Bridge Doc v1.0 + Sovereign Source Intake Spec
 // Purpose: Convert structured operational truth from the Budget
 //          Controller into a clean Master Architect Context Pack
 //          for AI Dev / executor sessions.
+//          Now grounded with P1 canonical Sovereign source truth.
+//
+// Truth Precedence applied in generateMasterArchitectPack:
+//   P1 current-handoff → P2 active-priority →
+//   P3 live controller → P4 repo/deploy → P5 notes
 //
 // DO NOT: Replace the app, rebuild the dashboard, or act as
 //         a fake billing engine.
 // ============================================================
 
 import { store } from './store'
+import {
+  sovereignStore,
+  mergeSovereignTruthWithControllerState,
+  getSovereignIntakeSummary,
+  type MergedTruthContext,
+  type SovereignIntakeSummary
+} from './sovereign'
 import type {
   SessionWithComputed, LaneWithComputed, EcosystemWithComputed,
   DecisionLog, EntityType, DecisionType
@@ -106,6 +119,10 @@ export interface MasterArchitectPack {
   prompt_constraints: string[]
   required_output_format: string[]
   text_pack: string   // Human + AI readable text block
+  // Sovereign Source grounding (HUB-18)
+  sovereign_grounded: boolean
+  sovereign_summary: SovereignIntakeSummary
+  merged_truth: MergedTruthContext
 }
 
 export interface ExecutionCloseoutPayload {
@@ -266,10 +283,16 @@ export function exportRepoAuthorityContext(): RepoAuthorityContext {
 }
 
 /**
- * Phase B.3 — generateMasterArchitectPack(sessionId)
+ * Phase B.3 (Upgraded HUB-18) — generateMasterArchitectPack(sessionId)
  * Combines all relevant exported truth into one final pack.
- * Purpose: Produce exact bridge output required by Master Architect.
- * This is the primary function — the one that MUST be tested first.
+ * Now grounded with Sovereign Source Intake (P1 precedence).
+ *
+ * Precedence applied:
+ *   P1 sovereign current-handoff  (if ingested)
+ *   P2 sovereign active-priority  (future)
+ *   P3 live controller state       (always present)
+ *   P4 repo/deploy runtime         (always present)
+ *   P5 conversational notes        (low-weight)
  */
 export function generateMasterArchitectPack(sessionId?: string): MasterArchitectPack {
   const now = new Date().toISOString()
@@ -282,7 +305,6 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
   if (sessionId) {
     sessionCtx = exportSessionPromptContext(sessionId)
     if (sessionCtx) {
-      // Get the session to find its lane_id
       const raw = store.getSession(sessionId)
       if (raw?.lane_id) {
         laneCtx = exportLanePromptContext(raw.lane_id)
@@ -308,6 +330,26 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
   const ecosystemCtx = exportEcosystemPromptContext()
   const repoCtx = exportRepoAuthorityContext()
 
+  // ── SOVEREIGN SOURCE MERGE (P1/P2 grounding) ───────────────
+  const activePayload = sovereignStore.getActive()
+  const mergedTruth = mergeSovereignTruthWithControllerState(
+    activePayload,
+    sessionCtx?.session_id
+  )
+  const sovereignSummary = getSovereignIntakeSummary()
+  const sovereign_grounded = sovereignSummary.has_active_source
+
+  // Augment repoCtx with sovereign supplement if available
+  const effectiveRepo: RepoAuthorityContext = {
+    ...repoCtx,
+    canonical_product_repo: mergedTruth.repo_supplement.product_repo || repoCtx.canonical_product_repo,
+    canonical_ecosystem_repo: mergedTruth.repo_supplement.ecosystem_repo || repoCtx.canonical_ecosystem_repo,
+    live_url: mergedTruth.repo_supplement.live_url || repoCtx.live_url,
+    execution_status: mergedTruth.deploy_state_override
+      ? `${mergedTruth.deploy_state_override.toUpperCase().replace(/_/g, '-')} (from ${mergedTruth.primary_source})`
+      : repoCtx.execution_status
+  }
+
   const promptConstraints = [
     'Do not drift beyond locked scope',
     'Do not continue if hard cap is exceeded',
@@ -316,7 +358,12 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
     'If scope changes materially, recommend a new session (SPLIT SESSION)',
     'Do not confuse local build truth with live deployment truth',
     'Do not rebuild the Budget Controller — use it as source of truth',
-    'Prefer structured context over long conversational memory'
+    'Prefer structured context over long conversational memory',
+    // Sovereign-specific constraints
+    'Respect governance freeze: if canon_status=frozen, do not alter governance fields',
+    'Truth precedence: P1 current-handoff > P2 active-priority > P3 controller > P4 repo > P5 notes',
+    ...(mergedTruth.governance_frozen ? ['GOVERNANCE CANON FROZEN — no modifications to canonical session archive'] : []),
+    ...(mergedTruth.next_locked_move ? [`Next locked move from sovereign source: ${mergedTruth.next_locked_move}`] : [])
   ]
 
   const requiredOutputFormat = [
@@ -334,8 +381,11 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
     '12. Next Locked Move'
   ]
 
-  // Generate readable text pack
-  const textPack = generateTextPack(sessionCtx, laneCtx, ecosystemCtx, decisionCtx, repoCtx, promptConstraints, requiredOutputFormat)
+  // Generate readable text pack (now sovereign-grounded)
+  const textPack = generateTextPack(
+    sessionCtx, laneCtx, ecosystemCtx, decisionCtx, effectiveRepo,
+    promptConstraints, requiredOutputFormat, mergedTruth, sovereignSummary
+  )
 
   return {
     generated_at: now,
@@ -344,10 +394,13 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
     lane: laneCtx,
     ecosystem: ecosystemCtx,
     decisions: decisionCtx,
-    repo: repoCtx,
+    repo: effectiveRepo,
     prompt_constraints: promptConstraints,
     required_output_format: requiredOutputFormat,
-    text_pack: textPack
+    text_pack: textPack,
+    sovereign_grounded,
+    sovereign_summary: sovereignSummary,
+    merged_truth: mergedTruth
   }
 }
 
@@ -360,7 +413,9 @@ function generateTextPack(
   decisions: DecisionSummaryContext | null,
   repo: RepoAuthorityContext,
   constraints: string[],
-  outputFormat: string[]
+  outputFormat: string[],
+  mergedTruth?: MergedTruthContext,
+  sovereignSummary?: SovereignIntakeSummary
 ): string {
   const lines: string[] = []
 
@@ -369,6 +424,25 @@ function generateTextPack(
   lines.push('==============================')
   lines.push(`Generated: ${new Date().toLocaleString()}`)
   lines.push(`Source: ${repo.live_url}`)
+
+  // Sovereign grounding header
+  if (sovereignSummary?.has_active_source) {
+    lines.push(`Sovereign Source: ${sovereignSummary.active_doc_id} (${sovereignSummary.active_precedence} — ${sovereignSummary.active_doc_type})`)
+    lines.push(`Source Confidence: ${sovereignSummary.confidence?.toUpperCase()}`)
+  } else {
+    lines.push('Sovereign Source: NOT INGESTED — grounded on P3 controller state only')
+    lines.push('Source Confidence: LOW — no P1 current-handoff loaded')
+  }
+  lines.push('')
+
+  // Sovereign merge warnings (if any)
+  if (mergedTruth && (mergedTruth.merge_warnings.length > 0 || mergedTruth.conflicts.length > 0)) {
+    lines.push('─── SOVEREIGN INTAKE WARNINGS ───────────────────────────')
+    mergedTruth.merge_warnings.forEach(w => lines.push(`⚠  ${w}`))
+    mergedTruth.conflicts.forEach(c => lines.push(`⚡ CONFLICT: ${c}`))
+    mergedTruth.conflict_resolutions.forEach(r => lines.push(`✓  RESOLVED: ${r}`))
+    lines.push('')
+  }
   lines.push('')
 
   // SESSION TRUTH
@@ -454,6 +528,23 @@ function generateTextPack(
   }
   lines.push('')
 
+  // GOVERNANCE TRUTH (from Sovereign Source, if available)
+  if (mergedTruth && (mergedTruth.governance_frozen || mergedTruth.canon_status !== 'unknown')) {
+    lines.push('─── GOVERNANCE / CANON TRUTH ────────────────────────────')
+    lines.push(`Canon Status:           ${mergedTruth.canon_status.toUpperCase()}${mergedTruth.governance_frozen ? ' 🔒 FROZEN' : ''}`)
+    if (mergedTruth.freeze_rules_override) {
+      lines.push(`Freeze Rules:           ${mergedTruth.freeze_rules_override}`)
+    }
+    if (mergedTruth.priority_order.length > 0) {
+      lines.push(`Priority Order:         ${mergedTruth.priority_order.join(' > ')}`)
+    }
+    if (mergedTruth.governance_frozen) {
+      lines.push('⚠  GOVERNANCE CANON FROZEN — modifications to canonical archive require explicit Founder approval')
+    }
+    lines.push(`Source Authority:       ${mergedTruth.primary_source}`)
+    lines.push('')
+  }
+
   // REPO / DEPLOYMENT TRUTH
   lines.push('─── REPO / DEPLOYMENT TRUTH ─────────────────────────────')
   lines.push(`Canonical Product Repo:   ${repo.canonical_product_repo}`)
@@ -464,6 +555,9 @@ function generateTextPack(
   lines.push(`Deploy Authority:         ${repo.deploy_authority}`)
   lines.push(`Env Readiness:            ${repo.env_readiness}`)
   lines.push(`Execution Status:         ${repo.execution_status}`)
+  if (mergedTruth?.deploy_state_override) {
+    lines.push(`Sovereign Deploy State:   ${mergedTruth.deploy_state_override.toUpperCase().replace(/_/g, '-')} (from ${mergedTruth.primary_source})`)
+  }
   lines.push('')
 
   // REQUIRED ACTION
@@ -481,6 +575,10 @@ function generateTextPack(
     lines.push(`Stop Condition:         If actual burn reaches ${session.hard_cap_budget_unit} BU OR no meaningful artifact produced`)
     lines.push(`Split Session Condition: If objective changes materially or new workstream appears`)
     lines.push(`Final Truth Required:   LIVE-VERIFIED (not just BUILD-VERIFIED or REPO-READY)`)
+    if (mergedTruth?.next_locked_move) {
+      lines.push('')
+      lines.push(`Sovereign Next Locked Move (P1): ${mergedTruth.next_locked_move}`)
+    }
   } else {
     lines.push('Required Action: Define active session before proceeding.')
   }
@@ -495,6 +593,24 @@ function generateTextPack(
   lines.push('─── REQUIRED OUTPUT FORMAT ──────────────────────────────')
   outputFormat.forEach(f => lines.push(f))
   lines.push('')
+
+  // SOVEREIGN SOURCE REFERENCE
+  if (sovereignSummary) {
+    lines.push('─── SOVEREIGN SOURCE REFERENCE ──────────────────────────')
+    lines.push(`Active Source:    ${sovereignSummary.has_active_source ? sovereignSummary.active_doc_id + ' (' + sovereignSummary.active_doc_type + ')' : 'NONE'}`)
+    lines.push(`Precedence:       ${sovereignSummary.active_precedence || 'N/A'}`)
+    lines.push(`Confidence:       ${sovereignSummary.confidence?.toUpperCase() || 'NONE'}`)
+    lines.push(`Sessions in Doc:  ${sovereignSummary.sessions_extracted}`)
+    lines.push(`Modules in Doc:   ${sovereignSummary.modules_extracted}`)
+    lines.push(`Governance:       ${sovereignSummary.governance_status}`)
+    lines.push(`Deploy State:     ${sovereignSummary.deploy_state?.toUpperCase().replace(/_/g, '-') || 'UNKNOWN'}`)
+    if (sovereignSummary.ingested_at) {
+      lines.push(`Ingested At:      ${new Date(sovereignSummary.ingested_at).toLocaleString()}`)
+    }
+    lines.push(`To ingest: POST /sovereign/api/ingest with { doc_id, doc_type, content }`)
+    lines.push('')
+  }
+
   lines.push('==============================')
   lines.push('END OF MASTER ARCHITECT CONTEXT PACK')
   lines.push('==============================')

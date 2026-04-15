@@ -27,6 +27,7 @@ import {
   exportRepoAuthorityContext,
   ingestExecutionCloseout
 } from '../lib/bridge'
+import { getSovereignIntakeSummary } from '../lib/sovereign'
 import type { EntityType, DecisionType } from '../lib/types'
 
 const bridge = new Hono()
@@ -44,6 +45,7 @@ bridge.get('/', (c) => {
   const activeSessions = sessions.filter(s => !['done', 'cancelled', 'frozen'].includes(s.status))
   const eco = exportEcosystemPromptContext()
   const repo = exportRepoAuthorityContext()
+  const sovereign = getSovereignIntakeSummary()
 
   // Session options for dropdown
   const sessionOptions = sessions.map(s => {
@@ -85,6 +87,28 @@ bridge.get('/', (c) => {
       </div>
     </div>
 
+    <!-- Sovereign Source Status Banner -->
+    <div class="card p-4 mb-4" style="border-color:${sovereign.has_active_source ? '#7c3aed' : '#475569'};background:${sovereign.has_active_source ? 'rgba(124,58,237,0.08)' : 'rgba(71,85,105,0.08)'}">
+      <div class="flex items-center justify-between">
+        <div class="flex items-start gap-3">
+          <i class="fas fa-layer-group mt-0.5" style="color:${sovereign.has_active_source ? '#a78bfa' : '#64748b'}"></i>
+          <div>
+            <div class="text-sm font-semibold mb-0.5" style="color:${sovereign.has_active_source ? '#a78bfa' : '#94a3b8'}">
+              Sovereign Source: ${sovereign.has_active_source ? sovereign.active_doc_id + ' (' + sovereign.active_precedence + ' — ' + sovereign.active_doc_type + ')' : 'NOT LOADED'}
+            </div>
+            <div class="text-xs text-slate-400">
+              ${sovereign.has_active_source
+                ? `Confidence: <span style="color:${sovereign.confidence === 'high' ? '#22c55e' : sovereign.confidence === 'medium' ? '#f59e0b' : '#ef4444'}">${sovereign.confidence?.toUpperCase()}</span> · Sessions: ${sovereign.sessions_extracted} · Governance: ${sovereign.governance_status}${sovereign.governance_status === 'frozen' ? ' 🔒' : ''} · Pack: grounded in P1 canonical truth`
+                : 'Pack is grounded on P3 controller state only. <a href="/sovereign" style="color:#a78bfa">Ingest current-handoff →</a>'}
+            </div>
+          </div>
+        </div>
+        <a href="/sovereign" class="btn-secondary text-xs py-1 px-3 flex-shrink-0">
+          <i class="fas fa-upload mr-1"></i>${sovereign.has_active_source ? 'Update Source' : 'Ingest Source'}
+        </a>
+      </div>
+    </div>
+
     <!-- Architecture Info Banner -->
     <div class="card p-4 mb-6" style="border-color:#1d4ed8;background:rgba(29,78,216,0.08)">
       <div class="flex items-start gap-3">
@@ -92,6 +116,8 @@ bridge.get('/', (c) => {
         <div>
           <div class="text-sm font-semibold text-blue-300 mb-1">Architecture Flow</div>
           <div class="text-xs text-slate-400">
+            <span class="text-violet-300 font-semibold">Sovereign Source (P1)</span>
+            <span class="text-slate-600 mx-2">→</span>
             <span class="text-white">Budget Controller App</span>
             <span class="text-slate-600 mx-2">→</span>
             <span class="text-blue-300 font-semibold">Prompt Bridge</span>

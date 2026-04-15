@@ -16,6 +16,7 @@ export function shellHtml(opts: {
     { href: '/ecosystem', label: 'Ecosystem', icon: 'fa-globe', key: 'ecosystem' },
     { href: '/decisions', label: 'Decision Log', icon: 'fa-book-open', key: 'decisions' },
     { href: '/bridge', label: 'Prompt Bridge', icon: 'fa-wand-magic-sparkles', key: 'bridge' },
+    { href: '/sovereign', label: 'Sovereign Intake', icon: 'fa-layer-group', key: 'sovereign' },
   ]
 
   const navHtml = navItems.map(item => {
