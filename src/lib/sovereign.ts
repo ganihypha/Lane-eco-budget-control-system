@@ -1234,6 +1234,7 @@ export interface MergedTruthContext {
 
   // Merged fields
   session_status_override: SovereignStatusNorm | null
+  session_status_override_note: string    // HUB-21: diagnostic label — why override is null (not_applicable / unresolved / resolved)
   deploy_state_override: SovereignDeployState | null
   governance_frozen: boolean
   governance_is_immutable: boolean
@@ -1327,6 +1328,9 @@ export function mergeSovereignTruthWithControllerState(
         'Ingest a current-handoff document at /sovereign to raise confidence to HIGH.'
       ],
       session_status_override: null,
+      session_status_override_note: controllerSessionId
+        ? `unresolved — no P1 source ingested to resolve ${controllerSessionId}`
+        : 'not_applicable — no session_id requested and no P1 source ingested',
       deploy_state_override: null,
       governance_frozen: false,
       governance_is_immutable: false,
@@ -1382,13 +1386,16 @@ export function mergeSovereignTruthWithControllerState(
       fieldSources['session_status_override'] = `canonical_truth (P1 — ${docSession.source_doc_id})`
       fieldSources['deploy_state_override'] = `canonical_truth (P1 — ${docSession.source_doc_id})`
     } else {
+      // HUB-21: session requested but not in P1 doc — honest unresolved with degraded scenario label
       unresolved.push('session_status_override')
-      fieldSources['session_status_override'] = `unresolved — session ${controllerSessionId} not found in P1 source`
+      fieldSources['session_status_override'] = `unresolved — session ${controllerSessionId} not found in P1 source (P3 controller state only for this session)`
       controllerFallback.push('session_status_override')
+      // Note: if governance is frozen and P1 doc covers other sessions, this is a degraded but not broken state
     }
   } else {
-    unresolved.push('session_status_override (no session_id requested)')
-    fieldSources['session_status_override'] = 'unresolved — no session_id provided to merge call'
+    // HUB-21: not_applicable when no session_id provided — this is expected behavior, not an error
+    // Do NOT push to unresolved — it would mislead diagnostics
+    fieldSources['session_status_override'] = 'not_applicable — no session_id requested (call with ?session=HUB-XX to resolve)'
   }
 
   // ── Governance — P1 immutable if frozen ──────────────────
@@ -1476,6 +1483,13 @@ export function mergeSovereignTruthWithControllerState(
   }
 
   // ── Final merge result ────────────────────────────────────
+  // ── Session status override note for diagnostics ──────────
+  const sessionStatusOverrideNote = (() => {
+    if (!controllerSessionId) return 'not_applicable — no session_id requested'
+    if (sessionStatusOverride) return `resolved — ${controllerSessionId} found in P1 source`
+    return `unresolved — ${controllerSessionId} not found in P1 source (P1 doc may not cover this session)`
+  })()
+
   return {
     primary_source: `${meta.source_label} (${meta.precedence} — ${meta.safe_source_id})`,
     precedence: meta.precedence,
@@ -1484,6 +1498,7 @@ export function mergeSovereignTruthWithControllerState(
     confidence_breakdown: meta.confidence_breakdown,
     merge_warnings: meta.parse_warnings,
     session_status_override: sessionStatusOverride,
+    session_status_override_note: sessionStatusOverrideNote,
     deploy_state_override: deployStateOverride || (repo?.deploy_state !== 'unknown' ? repo?.deploy_state || null : null),
     governance_frozen,
     governance_is_immutable,

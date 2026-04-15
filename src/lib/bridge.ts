@@ -333,10 +333,13 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
   const repoCtx = exportRepoAuthorityContext()
 
   // ── SOVEREIGN SOURCE MERGE (P1/P2 grounding) ───────────────
+  // HUB-21: Only pass session_id for merge if explicitly provided via sessionId param.
+  // If session was auto-picked (no explicit sessionId), pass undefined to avoid
+  // misleading "HUB-XX not found in P1 source" when user didn't request session-specific override.
   const activePayload = sovereignStore.getActive()
   const mergedTruth = mergeSovereignTruthWithControllerState(
     activePayload,
-    sessionCtx?.session_id
+    sessionId ? sessionCtx?.session_id : undefined  // Only pass if explicitly requested
   )
   const sovereignSummary = getSovereignIntakeSummary()
   const sovereign_grounded = sovereignSummary.has_active_source
@@ -457,26 +460,51 @@ function generateTextPack(
   }
   lines.push('')
 
-  // Sovereign merge warnings + conflicts (compact & actionable)
+  // HUB-21: Sovereign diagnostics — honest, sharper labeling
   if (mergedTruth) {
     const warnings = mergedTruth.merge_warnings.filter(w => !w.includes('No P1/P2') || !sovereignSummary?.has_active_source)
-    if (warnings.length > 0 || mergedTruth.conflicts.length > 0 || mergedTruth.unresolved_fields.length > 0) {
-      lines.push('─── SOVEREIGN INTAKE DIAGNOSTICS ────────────────────────')
-      if (mergedTruth.conflicts.length > 0) {
-        mergedTruth.conflicts.forEach(c => lines.push(`⚡ CONFLICT: ${c}`))
-        mergedTruth.conflict_resolutions.forEach(r => lines.push(`✓  RESOLVED: ${r}`))
-      }
-      if (mergedTruth.unresolved_fields.length > 0) {
-        lines.push(`⚠  Unresolved fields (${mergedTruth.unresolved_fields.length}): ${mergedTruth.unresolved_fields.slice(0, 4).join(', ')}`)
-      }
-      if (mergedTruth.controller_fallback_fields.length > 0) {
-        lines.push(`ℹ  Controller fallback used for: ${mergedTruth.controller_fallback_fields.slice(0, 3).join(', ')}`)
-      }
-      if (warnings.length > 0) {
-        warnings.slice(0, 2).forEach(w => lines.push(`⚠  ${w}`))
-      }
-      lines.push('')
+    const hasIssues = mergedTruth.conflicts.length > 0
+      || mergedTruth.unresolved_fields.length > 0
+      || mergedTruth.controller_fallback_fields.length > 0
+      || warnings.length > 0
+
+    lines.push('─── SOVEREIGN INTAKE DIAGNOSTICS ────────────────────────')
+    // Priority order — always show, never silently omit
+    if (mergedTruth.priority_order.length > 0) {
+      lines.push(`✓  Priority Order (P1): ${mergedTruth.priority_order.join(' > ')}`)
+    } else {
+      lines.push(`⚠  Priority Order: unresolved — not found in P1 source`)
     }
+
+    // session_status_override — always show with honest note
+    const ssoNote = (mergedTruth as any).session_status_override_note || ''
+    if (mergedTruth.session_status_override) {
+      lines.push(`✓  Session Status Override (P1): ${mergedTruth.session_status_override.toUpperCase()} [${ssoNote}]`)
+    } else if (ssoNote.startsWith('not_applicable')) {
+      lines.push(`ℹ  Session Status Override: not_applicable — provide ?session=HUB-XX for session-specific override`)
+    } else {
+      lines.push(`⚠  Session Status Override: ${ssoNote}`)
+    }
+
+    if (mergedTruth.conflicts.length > 0) {
+      mergedTruth.conflicts.forEach(c => lines.push(`⚡ CONFLICT: ${c}`))
+      mergedTruth.conflict_resolutions.forEach(r => lines.push(`✓  RESOLVED: ${r}`))
+    }
+    // Only show genuinely unresolved fields (not session_status_override when not_applicable)
+    const trueUnresolved = mergedTruth.unresolved_fields.filter(f => f !== 'session_status_override (no session_id requested)')
+    if (trueUnresolved.length > 0) {
+      lines.push(`⚠  Genuinely unresolved (${trueUnresolved.length}): ${trueUnresolved.slice(0, 4).join(', ')}`)
+    }
+    if (mergedTruth.controller_fallback_fields.length > 0) {
+      lines.push(`ℹ  Controller fallback (P3) used for: ${mergedTruth.controller_fallback_fields.filter(f => f !== 'session_status_override').slice(0, 3).join(', ')}`)
+    }
+    if (warnings.length > 0) {
+      warnings.slice(0, 2).forEach(w => lines.push(`⚠  ${w}`))
+    }
+    if (!hasIssues && trueUnresolved.length === 0) {
+      lines.push('✅ All resolvable fields resolved. No conflicts. Pack is clean.')
+    }
+    lines.push('')
   }
   lines.push('')
 

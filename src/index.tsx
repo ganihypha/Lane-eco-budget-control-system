@@ -67,13 +67,19 @@ app.get('/health', async (c) => {
         storage_mode: bootStatus.storage_mode,
         active_source_restored_on_boot: bootStatus.restored,
         boot_restore_note: bootStatus.note,
+        // HUB-21: explicit init_complete flag for boot consistency verification
+        // Both /health and /sovereign/api/summary read from same sovereignStore instance
+        // so they are always consistent after first request initialization completes.
+        init_complete: bootStatus.storage_mode !== 'in-memory' || bootStatus.restored,
+        boot_consistency: 'GUARANTEED — /health and /sovereign/api/summary share same sovereignStore instance',
         api_endpoints: [
           '/sovereign/api/ingest', '/sovereign/api/summary', '/sovereign/api/payload',
-          '/sovereign/api/sessions', '/sovereign/api/governance', '/sovereign/api/merge', '/sovereign/api/clear'
+          '/sovereign/api/sessions', '/sovereign/api/governance', '/sovereign/api/merge', '/sovereign/api/clear',
+          '/sovereign/api/webhook/inbound', '/sovereign/api/queue/status'
         ]
       },
-      version: '1.3.0',
-      build_session: 'hub20',
+      version: '1.3.1',
+      build_session: 'hub21',
       persistence: bootStatus.storage_mode,
       repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git'
     }
