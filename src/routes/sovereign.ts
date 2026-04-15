@@ -1,6 +1,6 @@
 // ============================================================
 // SOVEREIGN SOURCE INTAKE ROUTE — Lane-Eco Budget Control System
-// SESSION HUB-19: Truth-Maturity Upgrade
+// HUB-20: Persistent Storage + Boot Restore
 //
 // Routes:
 //   GET  /sovereign                   → Sovereign Intake UI (with truth-maturity badges)
@@ -24,6 +24,7 @@ import { Hono } from 'hono'
 import { shellHtml } from '../lib/ui'
 import {
   ingestSovereignSource,
+  ingestSovereignSourceAsync,
   syncSovereignIntakeToBridgeStore,
   mergeSovereignTruthWithControllerState,
   getSovereignIntakeSummary,
@@ -198,12 +199,32 @@ sovereign.get('/', (c) => {
     </div>`
   }).join('') : `<div class="text-center py-8 text-slate-500 text-sm">No documents ingested yet.</div>`
 
+  // ── Storage Mode + Boot Restore Banner (HUB-20) ──────────
+  const storageModeBanner = (() => {
+    const mode = summary.storage_mode || 'in-memory'
+    const modeColor = mode === 'persistent' ? '#22c55e' : mode === 'degraded' ? '#ef4444' : '#f59e0b'
+    const modeIcon = mode === 'persistent' ? 'database' : mode === 'degraded' ? 'exclamation-triangle' : 'memory'
+    const bootLabel = summary.active_source_restored_on_boot
+      ? `<span class="text-green-400">✅ Restored on boot: <strong>${summary.active_doc_id || 'N/A'}</strong></span>`
+      : `<span class="text-slate-400">No auto-restore — no P1 source in DB yet</span>`
+    return `
+  <div class="card p-3 mb-4 flex items-center gap-3" style="border-color:${modeColor}30;background:rgba(0,0,0,0.2)">
+    <i class="fas fa-${modeIcon}" style="color:${modeColor}"></i>
+    <div class="flex-1 text-xs">
+      <span class="font-bold" style="color:${modeColor}">Storage: ${mode.toUpperCase()}</span>
+      <span class="text-slate-500 ml-3">|</span>
+      <span class="ml-3">${bootLabel}</span>
+      ${summary.boot_restore_note ? `<div class="text-slate-600 mt-0.5 text-xs">${summary.boot_restore_note}</div>` : ''}
+    </div>
+  </div>`
+  })()
+
   const body = `
   <div class="p-6">
     <!-- Header -->
     <div class="flex items-center justify-between mb-4">
       <div>
-        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Sovereign Source Intake — HUB-19</div>
+        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Sovereign Source Intake — HUB-20</div>
         <h1 class="text-2xl font-bold text-white">Truth-Mature Canonical Ingestion</h1>
         <p class="text-sm text-slate-400 mt-1">Ingest <code class="text-violet-300">current-handoff</code> markdown to ground the Prompt Bridge in canonical Sovereign truth.</p>
       </div>
@@ -216,6 +237,9 @@ sovereign.get('/', (c) => {
         </div>
       </div>
     </div>
+
+    <!-- Storage Mode + Boot Restore Banner (HUB-20) -->
+    ${storageModeBanner}
 
     <!-- Architecture Banner -->
     <div class="card p-4 mb-5" style="border-color:#7c3aed;background:rgba(124,58,237,0.06)">
@@ -570,19 +594,59 @@ sovereign.post('/api/ingest', async (c) => {
     ? (doc_type as SovereignDocType)
     : 'unknown'
 
-  const payload = ingestSovereignSource(doc_id, docType, content)
+  // HUB-20: use async ingest — persists to D1 + in-memory
+  const payload = await ingestSovereignSourceAsync(doc_id, docType, content)
   const sync_result = syncSovereignIntakeToBridgeStore(payload)
+
+  const summary = getSovereignIntakeSummary()
 
   return c.json({
     success: true,
-    data: { ...payload, sync_result }
+    data: {
+      ...payload,
+      sync_result,
+      // HUB-20: include persistence diagnostics in ingest response
+      persistence: {
+        storage_mode: summary.storage_mode,
+        active_source_restored_on_boot: summary.active_source_restored_on_boot,
+        note: summary.storage_mode === 'persistent'
+          ? 'Source persisted to D1. Will survive restart/redeploy.'
+          : summary.storage_mode === 'degraded'
+          ? 'D1 write encountered an error. Source stored in-memory only (will not survive restart).'
+          : 'No D1 binding. Source stored in-memory only (will not survive restart).'
+      }
+    }
   })
 })
 
-// ─── API: INTAKE SUMMARY ─────────────────────────────────────
+// ─── API: INTAKE SUMMARY (HUB-20: with persistence diagnostics) ──
 sovereign.get('/api/summary', (c) => {
   const summary = getSovereignIntakeSummary()
-  return c.json({ success: true, data: summary })
+
+  // HUB-20: Clean epoch timestamps — never return 1970-01-01T00:00:00.000Z
+  const cleanIngestedAt = (() => {
+    if (!summary.ingested_at) return null
+    const ts = new Date(summary.ingested_at).getTime()
+    if (ts <= 0 || ts < 1000000000000) return null  // Before year 2001 = invalid epoch
+    return summary.ingested_at
+  })()
+
+  return c.json({
+    success: true,
+    data: {
+      ...summary,
+      ingested_at: cleanIngestedAt,
+      // HUB-20: explicit persistence diagnostics
+      storage_mode: summary.storage_mode,
+      active_source_restored_on_boot: summary.active_source_restored_on_boot,
+      boot_restore_note: summary.boot_restore_note,
+      // HUB-20: honest fallback disclosure
+      controller_fallback_active: !summary.has_active_source,
+      truth_authority: summary.has_active_source
+        ? `${summary.active_precedence} — ${summary.active_doc_type} (${summary.safe_source_id})`
+        : 'controller_fallback (P3) only — no P1 source ingested'
+    }
+  })
 })
 
 // ─── API: FULL PAYLOAD ───────────────────────────────────────

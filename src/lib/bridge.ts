@@ -441,6 +441,15 @@ function generateTextPack(
       const bd = sovereignSummary.confidence_breakdown
       lines.push(`Confidence Score: ${bd.dimensions_met}/${bd.total_dimensions} dimensions met`)
     }
+    // HUB-20: boot restore note
+    const sm = (sovereignSummary as any).storage_mode
+    const rob = (sovereignSummary as any).active_source_restored_on_boot
+    if (sm) {
+      lines.push(`Storage Mode:     ${sm}`)
+    }
+    if (rob !== undefined) {
+      lines.push(`Restored on boot: ${rob ? 'YES — P1 source auto-restored from D1' : 'NO — ingested in current session'}`)
+    }
   } else {
     lines.push('Sovereign Source: NOT INGESTED — controller_fallback (P3) only')
     lines.push('Source Confidence: LOW — no P1 current-handoff loaded')

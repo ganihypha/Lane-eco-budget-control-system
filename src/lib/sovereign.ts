@@ -1,6 +1,6 @@
 // ============================================================
 // SOVEREIGN SOURCE INTAKE — Lane-Eco Budget Control System
-// SESSION HUB-19: Truth-Maturity Upgrade
+// HUB-20: Persistent Storage + Boot Restore Upgrade
 //
 // Purpose: Ingest canonical Sovereign operating truth
 //          (current-handoff, active-priority) and normalize
@@ -204,21 +204,96 @@ export interface SovereignIntakePayload {
   merge_meta: SovereignMergeMeta | null
 }
 
-// ─── IN-MEMORY SOVEREIGN STORE ───────────────────────────────
+// ─── SOVEREIGN STORE (HUB-20: D1-backed with in-memory fallback) ────────────
+
+import { SovereignDBAdapter, type BootRestoreResult, type StorageMode } from './sovereign-db'
 
 /**
- * Lightweight in-memory store for sovereign intake payloads.
- * Does NOT replace or duplicate BudgetStore.
- * Stores raw docs + normalized payloads for pack merge.
+ * HUB-20: Unified Sovereign Intake Store
+ *
+ * Combines:
+ *   - SovereignDBAdapter (D1 persistent storage)
+ *   - In-memory cache (fast access, populated on boot restore)
+ *
+ * Storage modes:
+ *   persistent  — D1 bound, data survives restart
+ *   in-memory   — No D1 binding, ephemeral (warns honestly)
+ *   degraded    — D1 bound but error occurred, fallback to in-memory
+ *
+ * Boot restore:
+ *   On app start, initSovereignDB() restores most recent valid P1/P2
+ *   source from D1 into in-memory cache.
  */
 class SovereignIntakeStore {
   private intakes: Map<string, SovereignIntakePayload> = new Map()
   private rawDocs: Map<string, string> = new Map()
   private activeDocId: string | null = null
 
+  // HUB-20: D1 adapter + boot status
+  private dbAdapter: SovereignDBAdapter | null = null
+  private _dbInitialized = false
+  private _bootStatus: BootRestoreResult = {
+    restored: false,
+    restored_doc_id: null,
+    restored_precedence: null,
+    storage_mode: 'in-memory',
+    note: 'D1 not yet initialized — awaiting first request.'
+  }
+
+  // ── D1 initialization (called once on first request) ──────
+
+  async initDB(db: D1Database): Promise<void> {
+    if (this._dbInitialized) return
+    this._dbInitialized = true
+
+    this.dbAdapter = new SovereignDBAdapter(db)
+
+    // Attempt boot restore from D1
+    const { payload, result } = await this.dbAdapter.restoreActiveSource()
+    this._bootStatus = result
+
+    if (payload) {
+      // Populate in-memory cache with restored payload
+      this.intakes.set(payload.source_meta.doc_id, payload)
+      // P1 or P2 — set as active
+      if (payload.source_meta.precedence === 'P1' || payload.source_meta.precedence === 'P2') {
+        this.activeDocId = payload.source_meta.doc_id
+      }
+    }
+  }
+
+  getStorageMode(): StorageMode {
+    return this.dbAdapter?.storageMode ?? 'in-memory'
+  }
+
+  getBootStatus(): BootRestoreResult {
+    return this._bootStatus
+  }
+
+  // ── Save (in-memory + D1 async) ────────────────────────────
+
+  async saveAsync(payload: SovereignIntakePayload, rawContent: string = ''): Promise<void> {
+    // Always update in-memory first (fast path)
+    this.intakes.set(payload.source_meta.doc_id, payload)
+    if (payload.source_meta.precedence === 'P1' || payload.source_meta.precedence === 'P2') {
+      this.activeDocId = payload.source_meta.doc_id
+    }
+    this.rawDocs.set(payload.source_meta.doc_id, rawContent)
+
+    // Persist to D1 if available
+    if (this.dbAdapter) {
+      await this.dbAdapter.savePayload(payload, rawContent)
+      if (payload.source_meta.precedence === 'P1' || payload.source_meta.precedence === 'P2') {
+        await this.dbAdapter.setActiveSource(payload.source_meta.doc_id)
+      }
+    }
+  }
+
+  // ── Legacy sync save (kept for backward compat) ───────────
+
   save(payload: SovereignIntakePayload): void {
     this.intakes.set(payload.source_meta.doc_id, payload)
-    if (payload.source_meta.precedence === 'P1') {
+    if (payload.source_meta.precedence === 'P1' || payload.source_meta.precedence === 'P2') {
       this.activeDocId = payload.source_meta.doc_id
     }
   }
@@ -261,6 +336,32 @@ class SovereignIntakeStore {
 }
 
 export const sovereignStore = new SovereignIntakeStore()
+
+// ─── HUB-20: PUBLIC INIT + BOOT STATUS API ───────────────────
+
+/**
+ * initSovereignDB(db)
+ *
+ * Call once from app middleware on first request.
+ * Injects D1 binding into sovereign store and triggers boot restore.
+ * Idempotent — safe to call on every request.
+ */
+export async function initSovereignDB(db: D1Database): Promise<void> {
+  await sovereignStore.initDB(db)
+}
+
+/**
+ * getSovereignBootStatus()
+ *
+ * Returns current boot restore status for health endpoint diagnostics.
+ */
+export function getSovereignBootStatus(): BootRestoreResult & { storage_mode: StorageMode } {
+  const status = sovereignStore.getBootStatus()
+  return {
+    ...status,
+    storage_mode: sovereignStore.getStorageMode()
+  }
+}
 
 // ─── LAYER A: INGESTION ───────────────────────────────────────
 
@@ -331,7 +432,26 @@ export function ingestSovereignSource(
     merge_meta: null
   }
 
+  // HUB-20: async save to D1 + in-memory (non-blocking, fire-and-forget)
+  // Route handler will await this via ingestSovereignSourceAsync
   sovereignStore.save(payload)
+  return payload
+}
+
+/**
+ * HUB-20: ingestSovereignSourceAsync
+ *
+ * Same as ingestSovereignSource but persists to D1 as well.
+ * Call from route handlers where async context is available.
+ */
+export async function ingestSovereignSourceAsync(
+  docId: string,
+  docType: SovereignDocType,
+  rawMarkdown: string
+): Promise<SovereignIntakePayload> {
+  const payload = ingestSovereignSource(docId, docType, rawMarkdown)
+  // Persist to D1 (stores in-memory too via saveAsync)
+  await sovereignStore.saveAsync(payload, rawMarkdown)
   return payload
 }
 
@@ -1417,10 +1537,17 @@ export interface SovereignIntakeSummary {
   parse_warnings: string[]
   // HUB-19: safe display fields
   safe_source_id: string | null
+  // HUB-20: persistence diagnostics
+  storage_mode: StorageMode
+  active_source_restored_on_boot: boolean
+  boot_restore_note: string
 }
 
 export function getSovereignIntakeSummary(): SovereignIntakeSummary {
   const active = sovereignStore.getActive()
+  const bootStatus = sovereignStore.getBootStatus()
+  const storageMode = sovereignStore.getStorageMode()
+
   if (!active) {
     return {
       has_active_source: false,
@@ -1438,7 +1565,11 @@ export function getSovereignIntakeSummary(): SovereignIntakeSummary {
       confidence_breakdown: null,
       ingested_at: null,
       parse_warnings: ['No sovereign source ingested. Pack grounded in controller state only (P3).'],
-      safe_source_id: null
+      safe_source_id: null,
+      // HUB-20: persistence diagnostics
+      storage_mode: storageMode,
+      active_source_restored_on_boot: bootStatus.restored,
+      boot_restore_note: bootStatus.note
     }
   }
 
@@ -1458,6 +1589,10 @@ export function getSovereignIntakeSummary(): SovereignIntakeSummary {
     confidence_breakdown: active.source_meta.confidence_breakdown || null,
     ingested_at: active.source_meta.ingested_at,
     parse_warnings: active.source_meta.parse_warnings,
-    safe_source_id: active.source_meta.safe_source_id
+    safe_source_id: active.source_meta.safe_source_id,
+    // HUB-20: persistence diagnostics
+    storage_mode: storageMode,
+    active_source_restored_on_boot: bootStatus.restored,
+    boot_restore_note: bootStatus.note
   }
 }

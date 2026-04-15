@@ -1,8 +1,8 @@
 // ============================================================
 // LANE-ECO BUDGET CONTROL SYSTEM — Main Entry Point
-// SESSION HUB-16: Greenfield Build
+// HUB-20: Persistent Sovereign Intake Storage + Boot Restore
 // Internal operational tool: Session/Lane/Ecosystem Budget Control
-// Stack: Hono + TypeScript + Cloudflare Pages
+// Stack: Hono + TypeScript + Cloudflare Pages + D1
 // ============================================================
 
 import { Hono } from 'hono'
@@ -14,19 +14,40 @@ import ecosystem from './routes/ecosystem'
 import decisions from './routes/decisions'
 import bridge from './routes/bridge'
 import sovereign from './routes/sovereign'
+import { initSovereignDB, getSovereignBootStatus } from './lib/sovereign'
 
-const app = new Hono()
+// ─── CLOUDFLARE BINDINGS TYPE ────────────────────────────────
+
+type Bindings = {
+  SOVEREIGN_DB: D1Database
+}
+
+const app = new Hono<{ Bindings: Bindings }>()
 
 // ─── STATIC ─────────────────────────────────────────────────
 app.use('/static/*', serveStatic({ root: './public' }))
 
+// ─── BOOT INIT MIDDLEWARE ────────────────────────────────────
+// On every first request, initialize D1 adapter and attempt boot restore.
+// Uses a lightweight singleton flag to avoid re-running per request.
+
+app.use('*', async (c, next) => {
+  // Inject SOVEREIGN_DB into the sovereign module on first request
+  // The initSovereignDB call is idempotent — only runs full restore once.
+  if (c.env?.SOVEREIGN_DB) {
+    await initSovereignDB(c.env.SOVEREIGN_DB)
+  }
+  await next()
+})
+
 // ─── HEALTH ─────────────────────────────────────────────────
-app.get('/health', (c) => {
+app.get('/health', async (c) => {
+  const bootStatus = getSovereignBootStatus()
+
   return c.json({
     success: true,
     data: {
       service: 'Lane-Eco Budget Control System',
-
       status: 'operational',
       timestamp: new Date().toISOString(),
       modules: ['dashboard', 'sessions', 'lanes', 'ecosystem', 'decisions', 'prompt_bridge', 'sovereign_intake'],
@@ -35,15 +56,25 @@ app.get('/health', (c) => {
         phase_b: 'pack_generator',
         phase_c: 'closeout_ingestor',
         phase_d: 'sovereign_source_intake',
-        api_endpoints: ['/bridge/api/pack', '/bridge/api/ecosystem', '/bridge/api/repo', '/bridge/api/session', '/bridge/api/lane', '/bridge/api/decisions', '/bridge/api/ingest']
+        phase_e: 'truth_maturity_upgrade',
+        api_endpoints: [
+          '/bridge/api/pack', '/bridge/api/ecosystem', '/bridge/api/repo',
+          '/bridge/api/session', '/bridge/api/lane', '/bridge/api/decisions', '/bridge/api/ingest'
+        ]
       },
       sovereign_intake: {
         status: 'active',
-        api_endpoints: ['/sovereign/api/ingest', '/sovereign/api/summary', '/sovereign/api/payload', '/sovereign/api/sessions', '/sovereign/api/governance', '/sovereign/api/merge', '/sovereign/api/clear']
+        storage_mode: bootStatus.storage_mode,
+        active_source_restored_on_boot: bootStatus.restored,
+        boot_restore_note: bootStatus.note,
+        api_endpoints: [
+          '/sovereign/api/ingest', '/sovereign/api/summary', '/sovereign/api/payload',
+          '/sovereign/api/sessions', '/sovereign/api/governance', '/sovereign/api/merge', '/sovereign/api/clear'
+        ]
       },
-      version: '1.2.0',
-      build_session: 'hub18',
-      persistence: 'in-memory',
+      version: '1.3.0',
+      build_session: 'hub20',
+      persistence: bootStatus.storage_mode,
       repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git'
     }
   })
