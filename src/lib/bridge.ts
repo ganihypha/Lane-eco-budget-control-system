@@ -4,6 +4,7 @@
 // Phase B: Pack Generator (upgraded: Sovereign-grounded)
 // Phase C: Closeout Ingestion
 // Phase D: Sovereign Source Integration (HUB-18)
+// Phase E: Truth-Maturity Upgrade (HUB-19)
 //
 // Spec: Prompt Bridge Doc v1.0 + Sovereign Source Intake Spec
 // Purpose: Convert structured operational truth from the Budget
@@ -123,6 +124,7 @@ export interface MasterArchitectPack {
   sovereign_grounded: boolean
   sovereign_summary: SovereignIntakeSummary
   merged_truth: MergedTruthContext
+  truth_maturity_level: string  // HUB-19: NONE/LOW/MEDIUM/HIGH
 }
 
 export interface ExecutionCloseoutPayload {
@@ -400,7 +402,8 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
     text_pack: textPack,
     sovereign_grounded,
     sovereign_summary: sovereignSummary,
-    merged_truth: mergedTruth
+    merged_truth: mergedTruth,
+    truth_maturity_level: mergedTruth.truth_maturity || 'LOW'
   }
 }
 
@@ -425,23 +428,46 @@ function generateTextPack(
   lines.push(`Generated: ${new Date().toLocaleString()}`)
   lines.push(`Source: ${repo.live_url}`)
 
-  // Sovereign grounding header
+  // ── TRUTH MATURITY HEADER (HUB-19) ─────────────────────────
+  const maturity = mergedTruth?.truth_maturity || (sovereignSummary?.has_active_source ? 'MEDIUM' : 'LOW')
+  lines.push(`Truth Maturity:   ${maturity}`)
+
   if (sovereignSummary?.has_active_source) {
-    lines.push(`Sovereign Source: ${sovereignSummary.active_doc_id} (${sovereignSummary.active_precedence} — ${sovereignSummary.active_doc_type})`)
+    // HUB-19: show safe_source_id, not any URL or tokenized endpoint
+    const safeId = sovereignSummary.safe_source_id || sovereignSummary.active_doc_id
+    lines.push(`Sovereign Source: ${safeId} (${sovereignSummary.active_precedence} — ${sovereignSummary.active_doc_type})`)
     lines.push(`Source Confidence: ${sovereignSummary.confidence?.toUpperCase()}`)
+    if (sovereignSummary.confidence_breakdown) {
+      const bd = sovereignSummary.confidence_breakdown
+      lines.push(`Confidence Score: ${bd.dimensions_met}/${bd.total_dimensions} dimensions met`)
+    }
   } else {
-    lines.push('Sovereign Source: NOT INGESTED — grounded on P3 controller state only')
+    lines.push('Sovereign Source: NOT INGESTED — controller_fallback (P3) only')
     lines.push('Source Confidence: LOW — no P1 current-handoff loaded')
+    lines.push('Action Required:  Ingest current-handoff at /sovereign to raise truth maturity')
   }
   lines.push('')
 
-  // Sovereign merge warnings (if any)
-  if (mergedTruth && (mergedTruth.merge_warnings.length > 0 || mergedTruth.conflicts.length > 0)) {
-    lines.push('─── SOVEREIGN INTAKE WARNINGS ───────────────────────────')
-    mergedTruth.merge_warnings.forEach(w => lines.push(`⚠  ${w}`))
-    mergedTruth.conflicts.forEach(c => lines.push(`⚡ CONFLICT: ${c}`))
-    mergedTruth.conflict_resolutions.forEach(r => lines.push(`✓  RESOLVED: ${r}`))
-    lines.push('')
+  // Sovereign merge warnings + conflicts (compact & actionable)
+  if (mergedTruth) {
+    const warnings = mergedTruth.merge_warnings.filter(w => !w.includes('No P1/P2') || !sovereignSummary?.has_active_source)
+    if (warnings.length > 0 || mergedTruth.conflicts.length > 0 || mergedTruth.unresolved_fields.length > 0) {
+      lines.push('─── SOVEREIGN INTAKE DIAGNOSTICS ────────────────────────')
+      if (mergedTruth.conflicts.length > 0) {
+        mergedTruth.conflicts.forEach(c => lines.push(`⚡ CONFLICT: ${c}`))
+        mergedTruth.conflict_resolutions.forEach(r => lines.push(`✓  RESOLVED: ${r}`))
+      }
+      if (mergedTruth.unresolved_fields.length > 0) {
+        lines.push(`⚠  Unresolved fields (${mergedTruth.unresolved_fields.length}): ${mergedTruth.unresolved_fields.slice(0, 4).join(', ')}`)
+      }
+      if (mergedTruth.controller_fallback_fields.length > 0) {
+        lines.push(`ℹ  Controller fallback used for: ${mergedTruth.controller_fallback_fields.slice(0, 3).join(', ')}`)
+      }
+      if (warnings.length > 0) {
+        warnings.slice(0, 2).forEach(w => lines.push(`⚠  ${w}`))
+      }
+      lines.push('')
+    }
   }
   lines.push('')
 
@@ -528,35 +554,54 @@ function generateTextPack(
   }
   lines.push('')
 
-  // GOVERNANCE TRUTH (from Sovereign Source, if available)
-  if (mergedTruth && (mergedTruth.governance_frozen || mergedTruth.canon_status !== 'unknown')) {
+  // GOVERNANCE TRUTH (HUB-19: immutable frozen + honest unresolved)
+  {
     lines.push('─── GOVERNANCE / CANON TRUTH ────────────────────────────')
-    lines.push(`Canon Status:           ${mergedTruth.canon_status.toUpperCase()}${mergedTruth.governance_frozen ? ' 🔒 FROZEN' : ''}`)
-    if (mergedTruth.freeze_rules_override) {
-      lines.push(`Freeze Rules:           ${mergedTruth.freeze_rules_override}`)
+    const canonStatusDisplay = mergedTruth?.canon_status || 'unresolved — not found in canonical source'
+    const isKnownUnresolved = canonStatusDisplay.startsWith('unresolved') || canonStatusDisplay === 'unknown'
+
+    if (mergedTruth?.governance_frozen) {
+      // HUB-19: Frozen governance — immutable, explicitly labeled
+      lines.push(`Canon Status:           ${canonStatusDisplay.toUpperCase()} 🔒 FROZEN (IMMUTABLE)`)
+      lines.push(`Immutability:           Cannot be overridden by P2/P3/P4/P5 sources`)
+      if (mergedTruth.freeze_rules_override) {
+        lines.push(`Freeze Rules:           ${mergedTruth.freeze_rules_override}`)
+      }
+      if (mergedTruth.priority_order.length > 0) {
+        lines.push(`Priority Order:         ${mergedTruth.priority_order.join(' > ')} [canonical_truth P1]`)
+      }
+      lines.push('⚠  GOVERNANCE CANON FROZEN — modifications require explicit Founder approval')
+      lines.push(`Source Authority:       ${mergedTruth.primary_source}`)
+    } else if (mergedTruth && !isKnownUnresolved) {
+      lines.push(`Canon Status:           ${canonStatusDisplay.toUpperCase()} [canonical_truth P1]`)
+      if (mergedTruth.priority_order.length > 0) {
+        lines.push(`Priority Order:         ${mergedTruth.priority_order.join(' > ')}`)
+      }
+      lines.push(`Source Authority:       ${mergedTruth.primary_source}`)
+    } else {
+      // HUB-19: honest unresolved rendering
+      lines.push(`Canon Status:           unresolved — not found in canonical source`)
+      lines.push(`Note:                   controller_fallback applied (P3) — no governance section in P1 doc`)
+      lines.push(`Action:                 Ingest a current-handoff doc with a governance/canon section`)
     }
-    if (mergedTruth.priority_order.length > 0) {
-      lines.push(`Priority Order:         ${mergedTruth.priority_order.join(' > ')}`)
-    }
-    if (mergedTruth.governance_frozen) {
-      lines.push('⚠  GOVERNANCE CANON FROZEN — modifications to canonical archive require explicit Founder approval')
-    }
-    lines.push(`Source Authority:       ${mergedTruth.primary_source}`)
     lines.push('')
   }
 
-  // REPO / DEPLOYMENT TRUTH
+  // REPO / DEPLOYMENT TRUTH (HUB-19: with explicit provenance per field)
   lines.push('─── REPO / DEPLOYMENT TRUTH ─────────────────────────────')
-  lines.push(`Canonical Product Repo:   ${repo.canonical_product_repo}`)
-  lines.push(`Canonical Ecosystem Repo: ${repo.canonical_ecosystem_repo}`)
+  const repoProductSrc = mergedTruth?.field_sources?.['repo_supplement.product_repo'] || 'controller_fallback (P3)'
+  const repoLiveUrlSrc = mergedTruth?.field_sources?.['repo_supplement.live_url'] || 'controller_fallback (P3)'
+  const repoDeployStateSrc = mergedTruth?.field_sources?.['repo_supplement.deploy_state'] || 'controller_fallback (P3)'
+  lines.push(`Canonical Product Repo:   ${repo.canonical_product_repo}  [${repoProductSrc}]`)
+  lines.push(`Canonical Ecosystem Repo: ${repo.canonical_ecosystem_repo}  [${repoProductSrc}]`)
   lines.push(`Local Working Repo:       ${repo.local_working_repo}`)
-  lines.push(`Live URL:                 ${repo.live_url}`)
+  lines.push(`Live URL:                 ${repo.live_url}  [${repoLiveUrlSrc}]`)
   lines.push(`Repo Match Status:        ${repo.repo_match_status}`)
   lines.push(`Deploy Authority:         ${repo.deploy_authority}`)
   lines.push(`Env Readiness:            ${repo.env_readiness}`)
-  lines.push(`Execution Status:         ${repo.execution_status}`)
+  lines.push(`Execution Status:         ${repo.execution_status}  [${repoDeployStateSrc}]`)
   if (mergedTruth?.deploy_state_override) {
-    lines.push(`Sovereign Deploy State:   ${mergedTruth.deploy_state_override.toUpperCase().replace(/_/g, '-')} (from ${mergedTruth.primary_source})`)
+    lines.push(`Sovereign Deploy State:   ${mergedTruth.deploy_state_override.toUpperCase().replace(/_/g, '-')} [canonical_truth P1]`)
   }
   lines.push('')
 
@@ -577,7 +622,12 @@ function generateTextPack(
     lines.push(`Final Truth Required:   LIVE-VERIFIED (not just BUILD-VERIFIED or REPO-READY)`)
     if (mergedTruth?.next_locked_move) {
       lines.push('')
-      lines.push(`Sovereign Next Locked Move (P1): ${mergedTruth.next_locked_move}`)
+      const nlmSrc = mergedTruth.field_sources?.['next_locked_move'] || 'canonical_truth P1'
+      lines.push(`Next Locked Move (P1):  ${mergedTruth.next_locked_move}  [${nlmSrc}]`)
+    } else if (mergedTruth) {
+      lines.push('')
+      lines.push(`Next Locked Move:       unresolved — not found in canonical source (P1)`)
+      lines.push(`Note:                   Check current-handoff for "Next Locked Move:" section`)
     }
   } else {
     lines.push('Required Action: Define active session before proceeding.')
@@ -594,20 +644,39 @@ function generateTextPack(
   outputFormat.forEach(f => lines.push(f))
   lines.push('')
 
-  // SOVEREIGN SOURCE REFERENCE
+  // SOVEREIGN SOURCE REFERENCE (HUB-19: safe labels, extraction completeness)
   if (sovereignSummary) {
     lines.push('─── SOVEREIGN SOURCE REFERENCE ──────────────────────────')
-    lines.push(`Active Source:    ${sovereignSummary.has_active_source ? sovereignSummary.active_doc_id + ' (' + sovereignSummary.active_doc_type + ')' : 'NONE'}`)
+    const safeId = sovereignSummary.safe_source_id || sovereignSummary.active_doc_id || 'NONE'
+    lines.push(`Active Source ID: ${safeId}  (safe_source_id — never a URL or endpoint)`)
+    lines.push(`Doc Type:         ${sovereignSummary.active_doc_type || 'N/A'}`)
     lines.push(`Precedence:       ${sovereignSummary.active_precedence || 'N/A'}`)
+    lines.push(`Truth Maturity:   ${sovereignSummary.truth_maturity || 'NONE'}`)
     lines.push(`Confidence:       ${sovereignSummary.confidence?.toUpperCase() || 'NONE'}`)
-    lines.push(`Sessions in Doc:  ${sovereignSummary.sessions_extracted}`)
-    lines.push(`Modules in Doc:   ${sovereignSummary.modules_extracted}`)
-    lines.push(`Governance:       ${sovereignSummary.governance_status}`)
-    lines.push(`Deploy State:     ${sovereignSummary.deploy_state?.toUpperCase().replace(/_/g, '-') || 'UNKNOWN'}`)
-    if (sovereignSummary.ingested_at) {
-      lines.push(`Ingested At:      ${new Date(sovereignSummary.ingested_at).toLocaleString()}`)
+    lines.push('')
+    lines.push('Extraction Completeness:')
+    if (mergedTruth?.extraction_completeness) {
+      const ec = mergedTruth.extraction_completeness
+      lines.push(`  Sessions found:    ${ec.sessions_found}`)
+      lines.push(`  Modules found:     ${ec.modules_found}`)
+      lines.push(`  Governance found:  ${ec.governance_found ? 'YES' : 'NO'}`)
+      lines.push(`  Next move found:   ${ec.next_move_found ? 'YES' : 'NO'}`)
+      lines.push(`  Repo truth found:  ${ec.repo_truth_found ? 'YES' : 'NO'}`)
+    } else {
+      lines.push(`  Sessions found:    ${sovereignSummary.sessions_extracted}`)
+      lines.push(`  Modules found:     ${sovereignSummary.modules_extracted}`)
+      lines.push(`  Governance:        ${sovereignSummary.governance_status}`)
     }
-    lines.push(`To ingest: POST /sovereign/api/ingest with { doc_id, doc_type, content }`)
+    lines.push('')
+    if (sovereignSummary.has_active_source) {
+      lines.push(`Deploy State:     ${sovereignSummary.deploy_state?.toUpperCase().replace(/_/g, '-') || 'UNKNOWN'}`)
+      if (sovereignSummary.ingested_at) {
+        lines.push(`Ingested At:      ${new Date(sovereignSummary.ingested_at).toLocaleString()}`)
+      }
+    } else {
+      lines.push('Status:           NO SOURCE INGESTED — pack is controller_fallback (P3) only')
+      lines.push('Action:           POST /sovereign/api/ingest { doc_id, doc_type: "current-handoff", content }')
+    }
     lines.push('')
   }
 

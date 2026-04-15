@@ -87,19 +87,38 @@ bridge.get('/', (c) => {
       </div>
     </div>
 
-    <!-- Sovereign Source Status Banner -->
-    <div class="card p-4 mb-4" style="border-color:${sovereign.has_active_source ? '#7c3aed' : '#475569'};background:${sovereign.has_active_source ? 'rgba(124,58,237,0.08)' : 'rgba(71,85,105,0.08)'}">
+    <!-- Sovereign Source Status Banner (HUB-19: truth maturity badge) -->
+    ${(() => {
+      const maturity = sovereign.truth_maturity || 'NONE'
+      const maturityColorMap: Record<string, string> = { HIGH: '#22c55e', MEDIUM: '#f59e0b', LOW: '#ef4444', NONE: '#475569' }
+      const maturityBgMap: Record<string, string> = { HIGH: 'rgba(34,197,94,0.08)', MEDIUM: 'rgba(245,158,11,0.08)', LOW: 'rgba(239,68,68,0.08)', NONE: 'rgba(71,85,105,0.08)' }
+      const mColor = maturityColorMap[maturity] || '#475569'
+      const mBg = maturityBgMap[maturity] || 'rgba(71,85,105,0.08)'
+      const confColor = sovereign.confidence === 'high' ? '#22c55e' : sovereign.confidence === 'medium' ? '#f59e0b' : '#ef4444'
+      const safeId = sovereign.safe_source_id || sovereign.active_doc_id
+      const bd = sovereign.confidence_breakdown
+      return `
+    <div class="card p-4 mb-4" style="border-color:${mColor}40;background:${mBg}">
       <div class="flex items-center justify-between">
         <div class="flex items-start gap-3">
-          <i class="fas fa-layer-group mt-0.5" style="color:${sovereign.has_active_source ? '#a78bfa' : '#64748b'}"></i>
+          <i class="fas fa-layer-group mt-0.5" style="color:${mColor}"></i>
           <div>
-            <div class="text-sm font-semibold mb-0.5" style="color:${sovereign.has_active_source ? '#a78bfa' : '#94a3b8'}">
-              Sovereign Source: ${sovereign.has_active_source ? sovereign.active_doc_id + ' (' + sovereign.active_precedence + ' — ' + sovereign.active_doc_type + ')' : 'NOT LOADED'}
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-sm font-semibold" style="color:${sovereign.has_active_source ? '#a78bfa' : '#94a3b8'}">
+                Sovereign Source: ${sovereign.has_active_source ? safeId + ' (' + sovereign.active_precedence + ' — ' + sovereign.active_doc_type + ')' : 'NOT LOADED'}
+              </span>
+              <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${mBg};color:${mColor};border:1px solid ${mColor}40">
+                ${maturity}
+              </span>
             </div>
             <div class="text-xs text-slate-400">
               ${sovereign.has_active_source
-                ? `Confidence: <span style="color:${sovereign.confidence === 'high' ? '#22c55e' : sovereign.confidence === 'medium' ? '#f59e0b' : '#ef4444'}">${sovereign.confidence?.toUpperCase()}</span> · Sessions: ${sovereign.sessions_extracted} · Governance: ${sovereign.governance_status}${sovereign.governance_status === 'frozen' ? ' 🔒' : ''} · Pack: grounded in P1 canonical truth`
-                : 'Pack is grounded on P3 controller state only. <a href="/sovereign" style="color:#a78bfa">Ingest current-handoff →</a>'}
+                ? `Confidence: <span style="color:${confColor};font-weight:600">${sovereign.confidence?.toUpperCase()}</span>` +
+                  ` · Sessions: ${sovereign.sessions_extracted}` +
+                  ` · Governance: ${sovereign.governance_status}${sovereign.governance_status === 'frozen' ? ' 🔒' : ''}` +
+                  (bd ? ` · Score: ${bd.dimensions_met}/${bd.total_dimensions}` : '') +
+                  ` · Pack: canonical truth grounded`
+                : 'Pack grounded on P3 controller state only. Truth Maturity: NONE. <a href="/sovereign" style="color:#a78bfa">Ingest current-handoff →</a>'}
             </div>
           </div>
         </div>
@@ -107,7 +126,8 @@ bridge.get('/', (c) => {
           <i class="fas fa-upload mr-1"></i>${sovereign.has_active_source ? 'Update Source' : 'Ingest Source'}
         </a>
       </div>
-    </div>
+    </div>`
+    })()}
 
     <!-- Architecture Info Banner -->
     <div class="card p-4 mb-6" style="border-color:#1d4ed8;background:rgba(29,78,216,0.08)">
