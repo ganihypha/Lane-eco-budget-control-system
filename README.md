@@ -1,150 +1,180 @@
 # Lane-Eco Budget Control System
-> Internal Operational Tool — Session / Lane / Ecosystem Budget Management + Prompt Bridge
 
-## Project Overview
-- **Build Session**: HUB-17 (Prompt Bridge Implementation)
-- **Version**: 1.1.0
-- **Status**: ✅ LIVE-VERIFIED (12/12 routes on production)
-- **Canonical Repo**: https://github.com/ganihypha/Lane-eco-budget-control-system.git
-- **Stack**: Hono + TypeScript + Cloudflare Pages + Tailwind CSS CDN
+**Version:** 1.2.0 | **Build Session:** HUB-18 | **Status:** ✅ LIVE-VERIFIED
 
-## URLs
-- **Production**: https://lane-eco-budget-control.pages.dev
-- **Prompt Bridge**: https://lane-eco-budget-control.pages.dev/bridge
-- **GitHub Repo**: https://github.com/ganihypha/Lane-eco-budget-control-system
+Internal operational tool for managing session, lane, and ecosystem budgets — with Sovereign Source Intake for canonical truth grounding.
 
-## What This Is
-An internal operational tool that answers:
-- What session is active right now?
-- Has this session exceeded its budget cap?
-- Which lanes are healthy vs overloaded?
-- Should the next session GO, WATCH, or STOP?
-- How much total ecosystem budget is committed?
-- What decisions have been made and why?
-- **[NEW] Generate a Master Architect Context Pack from live truth**
-- **[NEW] Ingest execution closeout from AI Dev back into the system**
+---
 
-## Architecture Flow (v1.1)
-```
-Budget Controller App
-        ↓
-   Prompt Bridge Layer      ← NEW in v1.1
-        ↓
- Master Architect Context Pack
-        ↓
- Master Architect Prompt
-        ↓
-   AI Dev / Executor
-        ↓
- Execution Closeout         ← Ingested back into app
-        ↓
-Budget Controller App
-```
+## Live URLs
+- **Production:** https://lane-eco-budget-control.pages.dev
+- **Prompt Bridge:** https://lane-eco-budget-control.pages.dev/bridge
+- **Sovereign Intake:** https://lane-eco-budget-control.pages.dev/sovereign
+- **GitHub Repo:** https://github.com/ganihypha/Lane-eco-budget-control-system
 
-## Modules
-| Module | URL | Purpose |
+---
+
+## Modules (7 total — all LIVE-VERIFIED)
+
+| Module | Route | Description |
 |---|---|---|
-| Dashboard | `/` | Operational overview, active sessions, recommended actions |
-| Sessions | `/sessions` | CRUD, budget tracking, blocker management, status control |
-| Lanes | `/lanes` | Lane health, session rollup, maintenance decisions |
-| Ecosystem | `/ecosystem` | Period budget cap, pressure monitoring, freeze rules |
-| Decision Log | `/decisions` | Why things continued, stopped, froze, or escalated |
-| **Prompt Bridge** | `/bridge` | **Generate Master Architect Context Pack + Ingest Closeout** |
+| Dashboard | `/` | Budget overview, signals, recommended actions |
+| Sessions | `/sessions` | CRUD + budget tracking per session |
+| Lanes | `/lanes` | Lane health + budget rollup |
+| Ecosystem | `/ecosystem` | Total cap, freeze rules, pressure level |
+| Decision Log | `/decisions` | Historical go/stop/freeze decisions |
+| Prompt Bridge | `/bridge` | Generate Master Architect Context Pack |
+| Sovereign Intake | `/sovereign` | Ingest canonical current-handoff truth |
 
-## Prompt Bridge (v1.1) — API Endpoints
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/bridge` | Prompt Bridge UI (pack generator + closeout ingestor) |
-| GET | `/bridge/api/pack?session=ID` | **Generate full Master Architect Context Pack** |
-| GET | `/bridge/api/ecosystem` | Ecosystem pressure + freeze state |
-| GET | `/bridge/api/repo` | Repo / deploy authority truth |
-| GET | `/bridge/api/session?id=ID` | Session context export |
-| GET | `/bridge/api/lane?id=ID` | Lane context export |
-| GET | `/bridge/api/decisions?type=T&id=ID` | Decision summary |
-| POST | `/bridge/api/ingest` | Ingest execution closeout (JSON body) |
+---
 
-### Ingest Closeout Payload
-```json
-{
-  "session_id": "HUB-17",
-  "final_status": "done",
-  "actual_output": "What was delivered",
-  "actual_budget_unit": 5,
-  "blocker_type": "none",
-  "decision_type": "go",
-  "decision_reason": "Why this decision was made",
-  "next_locked_move": "What comes next",
-  "evidence_links": ["https://..."],
-  "created_by": "Founder"
-}
+## Architecture
+
+```
+Sovereign Source (P1 current-handoff)
+         ↓
+Budget Controller App (P3 — operational truth surface)
+         ↓
+Prompt Bridge (context export + pack generator)
+         ↓
+Master Architect Context Pack (17 sections, sovereign-grounded)
+         ↓
+Master Architect Prompt → AI Dev Executor
+         ↓
+Closeout Ingest → Back to App
 ```
 
-## Core Domain Model
-### Session
-Single execution unit. Tracks: planned_budget, hard_cap, actual_burn, status, blocker_type, go/stop signal.
+### Truth Precedence (P1 > P2 > P3 > P4 > P5)
+| Level | Source | Description |
+|---|---|---|
+| P1 | current-handoff | Canonical operating truth (highest) |
+| P2 | active-priority | Future priority doc |
+| P3 | live controller | Budget Controller app state |
+| P4 | repo/deploy | GitHub + Cloudflare runtime |
+| P5 | notes | Conversational context (lowest) |
 
-### Lane
-Collection of sessions under one operational stream. Tracks: budget rollup, health (healthy/watch/overloaded/frozen), session count.
+---
 
-### Ecosystem
-Top-level control context. Tracks: total budget cap, active lane/session limits, ecosystem health, freeze rules.
+## Sovereign Source Intake (HUB-18)
 
-### Decision Log
-Historical record of every control decision (go/stop/freeze/escalate/defer/close) with reason and evidence.
+**Purpose:** Ground the Prompt Bridge in real canonical truth from `current-handoff` documents instead of relying on controller state alone.
+
+### Layers
+- **Layer A — Ingestion:** `ingestSovereignSource(docId, docType, rawMarkdown)`
+- **Layer B — Normalization:** Extract session, module, governance, repo, secret, next-move truth from markdown
+- **Layer C — Bridge Store Sync:** `syncSovereignIntakeToBridgeStore()` — persists without overwriting controller
+- **Layer D — Pack Merge:** `mergeSovereignTruthWithControllerState()` — applies P1-P5 precedence
+
+### Status Normalization Enums
+`verified_ready_to_close` | `build_verified` | `live_verified` | `route_verified` | `closed_verified` | `complete_synced` | `partial` | `blocked` | `active` | `planned`
+
+### Governance Rule
+If `canon_status = frozen` (from P1 source), governance fields are **immutable** — no lower-precedence source can override.
+
+---
+
+## API Endpoints (17 verified)
+
+### Core
+- `GET /` — Dashboard
+- `GET /sessions` — Session list
+- `GET /lanes` — Lane list
+- `GET /ecosystem` — Ecosystem state
+- `GET /decisions` — Decision log
+- `GET /health` — Health check (version, modules, endpoints)
 
 ### Prompt Bridge
-Export layer that converts structured operational truth into Master Architect Context Pack.
-- Phase A: Export Layer (session, lane, ecosystem context)
-- Phase B: Pack Generator (generateMasterArchitectPack)
-- Phase C: Closeout Ingestor (ingestExecutionCloseout)
+- `GET /bridge` — Bridge UI
+- `GET /bridge/api/pack?session=SESSION_ID` — Generate Master Architect Pack
+- `GET /bridge/api/ecosystem` — Ecosystem context
+- `GET /bridge/api/repo` — Repo authority context
+- `GET /bridge/api/session?id=SESSION_ID` — Session context
+- `GET /bridge/api/lane?id=LANE_ID` — Lane context
+- `GET /bridge/api/decisions?type=session&id=X` — Decision summary
+- `POST /bridge/api/ingest` — Ingest execution closeout (JSON)
+- `POST /bridge/ingest` — Ingest closeout (form)
 
-## Budget Logic
-- **Planned Budget**: Expected spend
-- **Hard Cap**: Absolute stop limit — never exceed
-- **Actual Burn**: Manually logged per session
-- **Variance**: Planned - Actual
-- **Cap Status**: safe (< 80%) / warning (80-99%) / exceeded (≥ 100%)
-- **GO/WATCH/STOP Signal**: Computed from cap status + blocker + session status
-- **Lane Rollup**: Sum of all session actual_burn in the lane
-- **Ecosystem Rollup**: Sum of all non-cancelled sessions
+### Sovereign Intake
+- `GET /sovereign` — Sovereign Intake UI
+- `POST /sovereign/api/ingest` — Ingest raw markdown `{ doc_id, doc_type, content }`
+- `GET /sovereign/api/summary` — Intake summary + active source status
+- `GET /sovereign/api/payload?id=DOC_ID` — Full normalized payload
+- `GET /sovereign/api/list` — List all ingested documents
+- `GET /sovereign/api/sessions?id=DOC_ID` — Extracted session truth
+- `GET /sovereign/api/governance` — Governance/canon truth
+- `GET /sovereign/api/merge?session=SESSION_ID` — Merged truth context
+- `GET /sovereign/api/normalize?status=TEXT` — Normalize status string
+- `GET /sovereign/api/raw?id=DOC_ID` — Raw document text
+- `POST /sovereign/api/clear` — Clear intake store
 
-## Development
-```bash
-npm install
-npm run build
-pm2 start ecosystem.config.cjs
-# → http://localhost:3000
-```
+---
 
-## Deployment (Cloudflare Pages)
-```bash
-# Requires: CLOUDFLARE_API_TOKEN
-npm run build
-npx wrangler pages deploy dist --project-name lane-eco-budget-control
-```
+## Data Architecture
 
-## Current Status
-- ✅ All 6 modules operational (Dashboard, Sessions, Lanes, Ecosystem, Decisions, Prompt Bridge)
-- ✅ Prompt Bridge: Phase A (Export), Phase B (Pack Generator), Phase C (Closeout Ingestor)
-- ✅ 7 Bridge API endpoints live
-- ✅ Full CRUD: Sessions, Lanes, Ecosystem config
-- ✅ Budget rollup: Session → Lane → Ecosystem
-- ✅ Over-cap detection + STOP signal
-- ✅ Lane health computation (healthy/watch/overloaded/frozen)
-- ✅ Ecosystem health computation
-- ✅ Recommended actions engine
-- ✅ Decision log with entity linking
-- ✅ LIVE on Cloudflare Pages — 12/12 routes verified (v1.1)
-- ✅ GitHub pushed → ganihypha/Lane-eco-budget-control-system (main, HUB-17)
-- ⏳ Persistence: In-memory (upgrade to Cloudflare D1 when needed)
+**Persistence:** In-memory (resets on redeploy)
 
-## Next Locked Move (Post-HUB-17)
-1. **Use Prompt Bridge** → go to `/bridge`, select session, generate pack, paste into Master Architect Prompt
-2. Optional: Add D1 persistence for data survival across restarts
-3. Optional: BarberKas lane becomes first real use case
+**Domain Model:**
+- `Session` — planned/hard_cap/actual BU, status, blocker, signals
+- `Lane` — budget rollup, health (healthy/watch/overloaded/frozen)
+- `Ecosystem` — total cap, freeze rules, pressure level
+- `DecisionLog` — go/stop/freeze/split history
+- `SovereignIntakePayload` — normalized doc truth (source_meta, session_truth, governance_truth, repo_truth, etc.)
 
-## Repo Reality
-- **Canonical Product Repo**: https://github.com/ganihypha/Lane-eco-budget-control-system.git
-- **Canonical Ecosystem Repo**: https://github.com/ganihypha/Sovereign-ecosystem (governance home)
-- **Live URL**: https://lane-eco-budget-control.pages.dev/
-- **Execution Status**: LIVE-VERIFIED ✅
+**Budget Logic:**
+- Cap Status: safe (<80%) / warning (80-99%) / exceeded (≥100%)
+- Signals: GO / WATCH / STOP
+
+---
+
+## User Guide
+
+### Ingest current-handoff
+1. Open https://lane-eco-budget-control.pages.dev/sovereign
+2. Enter Document ID (e.g. `current-handoff-2026-04-15`)
+3. Select type: `current-handoff (P1 — Canonical)`
+4. Paste raw markdown content
+5. Click **Ingest Document**
+
+### Generate Grounded Context Pack
+1. Open https://lane-eco-budget-control.pages.dev/bridge
+2. Check Sovereign Source banner (should show active P1 source)
+3. Select target session
+4. Click **Generate Context Pack**
+5. Copy and paste into Master Architect Prompt conversation
+
+### Ingest Execution Closeout
+After AI Dev completes work:
+1. Open `/bridge` → **Ingest Execution Closeout** form
+2. Fill session ID, final status, actual burn, output
+3. Submit → closes planning→execution loop
+
+---
+
+## Deployment
+
+| Item | Status |
+|---|---|
+| Platform | Cloudflare Pages |
+| Build | ✅ 185.34 kB (48 modules) |
+| GitHub | ✅ ganihypha/Lane-eco-budget-control-system (main) |
+| Live | ✅ LIVE-VERIFIED (17/17 routes 200 OK) |
+| Last Deploy | HUB-18 (2026-04-15) |
+
+---
+
+## Session History
+
+| Session | Scope | Status | Build |
+|---|---|---|---|
+| HUB-16 | Budget Controller MVP Greenfield | LIVE-VERIFIED ✅ | v1.0.0 |
+| HUB-17 | Prompt Bridge v1.0 (Phase A+B+C) | LIVE-VERIFIED ✅ | v1.1.0 |
+| HUB-18 | Sovereign Source Intake v1.0 (Phase D) | LIVE-VERIFIED ✅ | v1.2.0 |
+
+---
+
+## Next Possible Steps (Optional)
+
+1. **Cloudflare D1 Persistence** — swap in-memory BudgetStore for D1 SQLite
+2. **BarberKas Lane Sessions** — start tracking sessions in lane-002
+3. **Supabase Integration** — external persistence for sovereignty across restarts
+4. **Automated Doc Fetch** — fetch `current-handoff` from GitHub repo on load
