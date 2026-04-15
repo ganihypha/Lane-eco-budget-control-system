@@ -12,6 +12,7 @@ import sessions from './routes/sessions'
 import lanes from './routes/lanes'
 import ecosystem from './routes/ecosystem'
 import decisions from './routes/decisions'
+import bridge from './routes/bridge'
 
 const app = new Hono()
 
@@ -24,11 +25,17 @@ app.get('/health', (c) => {
     success: true,
     data: {
       service: 'Lane-Eco Budget Control System',
-      build_session: 'hub16',
-      version: '1.0.0',
+      build_session: 'hub17',
+      version: '1.1.0',
       status: 'operational',
       timestamp: new Date().toISOString(),
-      modules: ['dashboard', 'sessions', 'lanes', 'ecosystem', 'decisions'],
+      modules: ['dashboard', 'sessions', 'lanes', 'ecosystem', 'decisions', 'prompt_bridge'],
+      prompt_bridge: {
+        phase_a: 'export_layer',
+        phase_b: 'pack_generator',
+        phase_c: 'closeout_ingestor',
+        api_endpoints: ['/bridge/api/pack', '/bridge/api/ecosystem', '/bridge/api/repo', '/bridge/api/session', '/bridge/api/lane', '/bridge/api/decisions', '/bridge/api/ingest']
+      },
       persistence: 'in-memory',
       repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git'
     }
@@ -41,6 +48,7 @@ app.route('/sessions', sessions)
 app.route('/lanes', lanes)
 app.route('/ecosystem', ecosystem)
 app.route('/decisions', decisions)
+app.route('/bridge', bridge)
 
 // ─── 404 ────────────────────────────────────────────────────
 app.notFound((c) => {

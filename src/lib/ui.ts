@@ -15,6 +15,7 @@ export function shellHtml(opts: {
     { href: '/lanes', label: 'Lanes', icon: 'fa-road', key: 'lanes' },
     { href: '/ecosystem', label: 'Ecosystem', icon: 'fa-globe', key: 'ecosystem' },
     { href: '/decisions', label: 'Decision Log', icon: 'fa-book-open', key: 'decisions' },
+    { href: '/bridge', label: 'Prompt Bridge', icon: 'fa-wand-magic-sparkles', key: 'bridge' },
   ]
 
   const navHtml = navItems.map(item => {
@@ -88,7 +89,7 @@ export function shellHtml(opts: {
         ${navHtml}
       </nav>
       <div class="absolute bottom-0 left-0 w-56 p-3 border-t border-slate-800" style="background:#1a2332;">
-        <div class="text-xs text-slate-600">Lane-Eco v1.0</div>
+        <div class="text-xs text-slate-600">Lane-Eco v1.1 — Bridge</div>
       </div>
     </aside>
 
