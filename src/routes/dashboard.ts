@@ -54,7 +54,7 @@ dashboard.get('/', (c) => {
         ${healthBadge(eco.ecosystem_health)}
       </div>
       <div class="flex items-center gap-4 text-xs text-slate-500">
-        <span>Freeze rule: ${eco.freeze_rules.substring(0, 60)}...</span>
+        <span>Freeze rule: ${(eco.freeze_rules || '').substring(0, 60)}${(eco.freeze_rules || '').length > 60 ? '...' : ''}</span>
         <a href="/ecosystem" class="text-blue-400 hover:text-blue-300">Configure →</a>
       </div>
     </div>
