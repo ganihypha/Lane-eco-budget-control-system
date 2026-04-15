@@ -1,23 +1,23 @@
 // ============================================================
 // SOVEREIGN SOURCE INTAKE ROUTE — Lane-Eco Budget Control System
-// HUB-20: Persistent Storage + Boot Restore
+// HUB-22: Webhook Secret Hardening + Live Integration
 //
 // Routes:
-//   GET  /sovereign                   → Sovereign Intake UI (with truth-maturity badges)
-//   POST /sovereign/api/ingest        → Ingest raw markdown doc
-//   GET  /sovereign/api/summary       → Intake summary + status
-//   GET  /sovereign/api/payload?id=X  → Full normalized payload
-//   GET  /sovereign/api/sessions?id=X → Extracted session truth
-//   GET  /sovereign/api/governance    → Governance truth
-//   GET  /sovereign/api/merge?session=X → Merged truth context with diagnostics
-//   POST /sovereign/api/clear         → Clear intake store (reset)
+//   GET  /sovereign                        → Sovereign Intake UI
+//   POST /sovereign/api/ingest             → Ingest raw markdown doc
+//   GET  /sovereign/api/summary            → Intake summary + status
+//   GET  /sovereign/api/payload?id=X       → Full normalized payload
+//   GET  /sovereign/api/sessions?id=X      → Extracted session truth
+//   GET  /sovereign/api/governance         → Governance truth
+//   GET  /sovereign/api/merge?session=X    → Merged truth context with diagnostics
+//   POST /sovereign/api/clear              → Clear intake store (reset)
 //
-// HUB-19 UI Additions:
-//   F1. Truth maturity badge (NONE/LOW/MEDIUM/HIGH)
-//   F2. Extraction completeness summary
-//   F3. Merge diagnostics panel
-//   F4. Safe source label (doc_id + type only)
-//   F5. Compact actionable warnings
+//   HUB-22 Webhook + Queue:
+//   POST /sovereign/api/webhook/inbound    → Secure webhook handler (WEBHOOK_SECRET)
+//   GET  /sovereign/api/webhook/log        → Webhook audit log
+//   GET  /sovereign/api/queue/status       → Batch queue status
+//   POST /sovereign/api/queue/process      → Manual queue transition
+//   POST /sovereign/api/queue/test         → Controlled E2E test scenario
 // ============================================================
 
 import { Hono } from 'hono'
@@ -774,44 +774,132 @@ sovereign.post('/api/clear', (c) => {
 })
 
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  HUB-21: TASK 3 — WEBHOOK INBOUND HANDLER                  ║
-// ║  Verifikasi dan implementasi inbound webhook flow            ║
+// ║  HUB-22: TASK 1 — WEBHOOK SECRET HARDENING                 ║
+// ║  Real WEBHOOK_SECRET validation with explicit classification ║
 // ╚══════════════════════════════════════════════════════════════╝
 
-// ─── IN-MEMORY WEBHOOK LOG (ephemeral, diagnostic only) ───────
+// ─── WEBHOOK VALIDATION RESULT TYPES ────────────────────────
+/**
+ * HUB-22 Token Validation Classification:
+ *   VALIDATED          — secret configured, token present, matches
+ *   INVALID_TOKEN      — secret configured, token present, does NOT match
+ *   MISSING_TOKEN      — secret configured, but no token in request
+ *   SECRET_NOT_CONFIGURED — no WEBHOOK_SECRET env var set
+ */
+type WebhookTokenResult =
+  | 'VALIDATED'
+  | 'INVALID_TOKEN'
+  | 'MISSING_TOKEN'
+  | 'SECRET_NOT_CONFIGURED'
+
+// ─── IN-MEMORY WEBHOOK LOG (ephemeral — classify honestly) ───
 interface WebhookInboundEvent {
   id: string
   received_at: string
   event_type: string
   source: string
   payload_keys: string[]
-  validation_status: 'valid' | 'invalid' | 'unknown'
+  // HUB-22: explicit token validation result
+  token_result: WebhookTokenResult
+  token_note: string
+  // Overall acceptance
+  validation_status: 'accepted' | 'rejected'
   validation_note: string
-  queue_handoff: 'accepted' | 'rejected' | 'skipped'
+  queue_handoff: 'accepted' | 'rejected'
   queue_note: string
   processing_decision: string
+  // Audit traceability (HUB-22 TASK 4)
+  audit: {
+    event_id: string
+    received_at: string
+    token_result: WebhookTokenResult
+    queue_handoff_result: string
+    final_status: string
+  }
 }
 
 const webhookLog: WebhookInboundEvent[] = []
 
+// ─── HELPER: Constant-time string comparison ────────────────
+// Prevents timing attacks when comparing tokens
+async function safeTokenCompare(a: string, b: string): Promise<boolean> {
+  // Use Web Crypto API (available in Cloudflare Workers)
+  try {
+    const enc = new TextEncoder()
+    const aBytes = enc.encode(a)
+    const bBytes = enc.encode(b)
+    if (aBytes.length !== bBytes.length) return false
+    // XOR all bytes — constant time
+    let diff = 0
+    for (let i = 0; i < aBytes.length; i++) {
+      diff |= aBytes[i] ^ bBytes[i]
+    }
+    return diff === 0
+  } catch {
+    // Fallback — not constant time but acceptable for low-risk envs
+    return a === b
+  }
+}
+
+// ─── HELPER: Validate webhook token ─────────────────────────
+async function validateWebhookToken(
+  requestToken: string | undefined,
+  configuredSecret: string | undefined
+): Promise<{ result: WebhookTokenResult; note: string }> {
+  // Case 1: No secret configured → cannot validate
+  if (!configuredSecret) {
+    return {
+      result: 'SECRET_NOT_CONFIGURED',
+      note: 'WEBHOOK_SECRET not configured in Cloudflare Pages environment. Set via: wrangler pages secret put WEBHOOK_SECRET --project-name lane-eco-budget-control'
+    }
+  }
+
+  // Case 2: Secret configured but no token in request
+  if (!requestToken) {
+    return {
+      result: 'MISSING_TOKEN',
+      note: 'WEBHOOK_SECRET is configured but request is missing X-Webhook-Token header. Request rejected.'
+    }
+  }
+
+  // Case 3: Both present — compare
+  const matches = await safeTokenCompare(requestToken, configuredSecret)
+  if (matches) {
+    return {
+      result: 'VALIDATED',
+      note: 'Token validated successfully against configured WEBHOOK_SECRET. Request accepted.'
+    }
+  } else {
+    return {
+      result: 'INVALID_TOKEN',
+      // Never reveal the configured secret or any part of it
+      note: 'Token does not match configured WEBHOOK_SECRET. Request rejected. Token value is NOT logged.'
+    }
+  }
+}
+
 /**
  * POST /sovereign/api/webhook/inbound
  *
- * Inbound webhook handler — receives external event payloads.
- * Validates structure, logs to ephemeral diagnostic store, hands off to queue.
+ * HUB-22: Secure inbound webhook handler with WEBHOOK_SECRET validation.
  *
- * Expected body: { event_type, source, payload }
- * Optional header: X-Webhook-Token (if configured)
+ * Expected body:  { event_type, source, payload? }
+ * Required header: X-Webhook-Token  (if WEBHOOK_SECRET is configured)
  *
- * Honest classification:
- * - No external secret configured → PARTIAL (validation skipped)
- * - Payload received and structured → ACCEPTED
- * - Missing required fields → REJECTED
+ * Token Validation Results:
+ *   VALIDATED          → 200, event queued
+ *   INVALID_TOKEN      → 401, rejected
+ *   MISSING_TOKEN      → 401, rejected
+ *   SECRET_NOT_CONFIGURED → 200, accepted (open), warned in response
+ *
+ * Audit fields always present:
+ *   event_id, received_at, token_result, queue_handoff_result, final_status
  */
 sovereign.post('/api/webhook/inbound', async (c) => {
   const receivedAt = new Date().toISOString()
   const eventId = `wh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
+  // ── Parse body ───────────────────────────────────────────
   let body: Record<string, unknown>
   try {
     body = await c.req.json()
@@ -822,73 +910,119 @@ sovereign.post('/api/webhook/inbound', async (c) => {
     }, 400)
   }
 
-  // ── Validation ───────────────────────────────────────────
+  // ── Required field check ─────────────────────────────────
   const requiredFields = ['event_type', 'source']
   const missingFields = requiredFields.filter(f => !body[f])
   const payloadKeys = Object.keys(body)
 
-  let validationStatus: WebhookInboundEvent['validation_status']
-  let validationNote: string
-
   if (missingFields.length > 0) {
-    validationStatus = 'invalid'
-    validationNote = `Missing required fields: ${missingFields.join(', ')}`
-  } else {
-    // HUB-21 HONEST CLASSIFICATION:
-    // No external secret store configured in this environment.
-    // Token validation is skipped — classified as PARTIAL, not LIVE-VERIFIED.
-    const webhookToken = c.req.header('X-Webhook-Token')
-    if (webhookToken) {
-      // Token present but no secret configured to verify against
-      validationStatus = 'unknown'
-      validationNote = 'PARTIAL: Token received but no WEBHOOK_SECRET configured — token not verified. Classify as PARTIAL.'
-    } else {
-      validationStatus = 'valid'
-      validationNote = 'Structure valid. No token validation configured (open endpoint). Recommend adding X-Webhook-Token + WEBHOOK_SECRET for production.'
+    return c.json({
+      success: false,
+      error: {
+        code: 'MISSING_FIELDS',
+        message: `Missing required fields: ${missingFields.join(', ')}`,
+        required: requiredFields
+      }
+    }, 400)
+  }
+
+  // ── HUB-22: Token validation ─────────────────────────────
+  // Read WEBHOOK_SECRET from Cloudflare env (passed via middleware context)
+  // Do NOT expose or log the secret value under any circumstances
+  const webhookSecret = (c.get('WEBHOOK_SECRET' as never) as string | undefined)
+    ?? (c as unknown as { env?: { WEBHOOK_SECRET?: string } }).env?.WEBHOOK_SECRET
+    ?? undefined
+
+  const requestToken = c.req.header('X-Webhook-Token') ?? undefined
+  const { result: tokenResult, note: tokenNote } = await validateWebhookToken(requestToken, webhookSecret)
+
+  // ── Reject on bad/missing token (when secret IS configured) ──
+  const shouldReject = tokenResult === 'INVALID_TOKEN' || tokenResult === 'MISSING_TOKEN'
+
+  if (shouldReject) {
+    // Log rejection attempt for audit (no sensitive values)
+    const rejectedEvent: WebhookInboundEvent = {
+      id: eventId,
+      received_at: receivedAt,
+      event_type: String(body.event_type || 'unknown'),
+      source: String(body.source || 'unknown'),
+      payload_keys: payloadKeys,
+      token_result: tokenResult,
+      token_note: tokenNote,
+      validation_status: 'rejected',
+      validation_note: tokenNote,
+      queue_handoff: 'rejected',
+      queue_note: `Rejected — token validation failed: ${tokenResult}`,
+      processing_decision: `REJECTED — ${tokenResult}`,
+      audit: {
+        event_id: eventId,
+        received_at: receivedAt,
+        token_result: tokenResult,
+        queue_handoff_result: 'rejected',
+        final_status: 'REJECTED'
+      }
     }
+    webhookLog.push(rejectedEvent)
+    if (webhookLog.length > 50) webhookLog.shift()
+
+    return c.json({
+      success: false,
+      error: {
+        code: tokenResult,
+        message: tokenNote
+      },
+      audit: {
+        event_id: eventId,
+        received_at: receivedAt,
+        token_result: tokenResult
+      }
+    }, 401)
   }
 
   // ── Queue Handoff ────────────────────────────────────────
-  let queueHandoff: WebhookInboundEvent['queue_handoff']
-  let queueNote: string
+  const eventType = String(body.event_type || 'unknown')
+  const source = String(body.source || 'unknown')
 
-  if (validationStatus === 'invalid') {
-    queueHandoff = 'rejected'
-    queueNote = `Rejected from queue: ${validationNote}`
-  } else {
-    // Hand off to in-memory batch queue
-    const eventType = String(body.event_type || 'unknown')
-    const source = String(body.source || 'unknown')
-    batchQueueAccept({
-      event_id: eventId,
-      event_type: eventType,
-      source,
-      payload: body.payload || null,
-      received_at: receivedAt
-    })
-    queueHandoff = 'accepted'
-    queueNote = `Accepted into batch queue. event_id: ${eventId}. Queue depth: ${batchQueue.length}`
-  }
+  batchQueueAccept({
+    event_id: eventId,
+    event_type: eventType,
+    source,
+    payload: body.payload ?? null,
+    received_at: receivedAt
+  })
 
-  // ── Log ──────────────────────────────────────────────────
+  const queueNote = `Accepted into batch queue. event_id: ${eventId}. Queue depth: ${batchQueue.length}.`
+
+  // ── Determine final classification ───────────────────────
+  // SECRET_NOT_CONFIGURED → PARTIAL (open endpoint, no validation possible)
+  // VALIDATED → verified (token validated, queue handoff confirmed)
+  const verificationLevel = tokenResult === 'VALIDATED'
+    ? 'VALIDATED — token verified, event queued'
+    : 'PARTIAL — SECRET_NOT_CONFIGURED, open endpoint, event queued without validation'
+
+  // ── Log for audit ────────────────────────────────────────
   const event: WebhookInboundEvent = {
     id: eventId,
     received_at: receivedAt,
-    event_type: String(body.event_type || 'unknown'),
-    source: String(body.source || 'unknown'),
+    event_type: eventType,
+    source,
     payload_keys: payloadKeys,
-    validation_status: validationStatus,
-    validation_note: validationNote,
-    queue_handoff: queueHandoff,
+    token_result: tokenResult,
+    token_note: tokenNote,
+    validation_status: 'accepted',
+    validation_note: tokenNote,
+    queue_handoff: 'accepted',
     queue_note: queueNote,
-    processing_decision: validationStatus === 'invalid'
-      ? `REJECTED — ${validationNote}`
-      : validationStatus === 'unknown'
-      ? `PARTIAL — token not verified, accepted with warning`
-      : `ACCEPTED — queued for processing`
+    processing_decision: `ACCEPTED — ${tokenResult}`,
+    audit: {
+      event_id: eventId,
+      received_at: receivedAt,
+      token_result: tokenResult,
+      queue_handoff_result: 'accepted',
+      final_status: tokenResult === 'VALIDATED' ? 'LIVE_VERIFIED' : 'PARTIAL'
+    }
   }
   webhookLog.push(event)
-  // Keep last 50 events only
   if (webhookLog.length > 50) webhookLog.shift()
 
   return c.json({
@@ -896,39 +1030,74 @@ sovereign.post('/api/webhook/inbound', async (c) => {
     data: {
       event_id: eventId,
       received_at: receivedAt,
-      validation_status: validationStatus,
-      validation_note: validationNote,
-      queue_handoff: queueHandoff,
+      token_result: tokenResult,
+      token_note: tokenNote,
+      queue_handoff: 'accepted',
       queue_note: queueNote,
       processing_decision: event.processing_decision,
-      // HUB-21 honest classification
-      verification_level: validationStatus === 'valid' ? 'STRUCTURE_VERIFIED'
-        : validationStatus === 'unknown' ? 'PARTIAL — token not verified'
-        : 'REJECTED'
+      verification_level: verificationLevel,
+      // HUB-22 audit trace
+      audit: event.audit
     }
   })
 })
 
 // ─── GET: WEBHOOK LOG ────────────────────────────────────────
 sovereign.get('/api/webhook/log', (c) => {
+  // HUB-22: Include overall classification honesty
+  const totalEvents = webhookLog.length
+  const validatedCount = webhookLog.filter(e => e.token_result === 'VALIDATED').length
+  const rejectedCount = webhookLog.filter(e => e.validation_status === 'rejected').length
+  const partialCount = webhookLog.filter(e => e.token_result === 'SECRET_NOT_CONFIGURED').length
+
+  // Never expose token values in log output — payload_keys only, no values
+  const safeEvents = [...webhookLog].reverse().slice(0, 20).map(e => ({
+    id: e.id,
+    received_at: e.received_at,
+    event_type: e.event_type,
+    source: e.source,
+    payload_keys: e.payload_keys,
+    token_result: e.token_result,
+    queue_handoff: e.queue_handoff,
+    processing_decision: e.processing_decision,
+    audit: e.audit
+  }))
+
+  const classificationLabel = (() => {
+    if (totalEvents === 0) return 'PENDING — no events received yet'
+    if (validatedCount > 0) return `PARTIAL — ${validatedCount} VALIDATED event(s), ${partialCount} open, ${rejectedCount} rejected`
+    if (partialCount > 0) return `PARTIAL — events received but SECRET_NOT_CONFIGURED (no token validation occurred)`
+    return `REJECTED_ONLY — all ${rejectedCount} events rejected (check token)`
+  })()
+
   return c.json({
     success: true,
     data: {
-      total_events: webhookLog.length,
-      events: [...webhookLog].reverse().slice(0, 20),  // Most recent 20
-      verification_note: 'HONEST CLASSIFICATION: This webhook handler is STRUCTURE-VERIFIED. Token validation requires WEBHOOK_SECRET env var not yet configured. Full E2E verification depends on external caller sending valid events.',
-      classification: webhookLog.length > 0 ? 'PARTIAL — events received and queued' : 'PENDING — no events received yet'
+      total_events: totalEvents,
+      validated_count: validatedCount,
+      partial_count: partialCount,
+      rejected_count: rejectedCount,
+      events: safeEvents,
+      classification: classificationLabel,
+      // HUB-22 honest status note
+      verification_note: validatedCount > 0
+        ? 'PARTIAL → approaching LIVE_VERIFIED: At least one event was token-validated. Full LIVE_VERIFIED requires real external caller sending events through the secured path.'
+        : 'PARTIAL: WEBHOOK_SECRET not yet configured or no validated events. Configure secret then send real events to achieve LIVE_VERIFIED.'
     }
   })
 })
 
 
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  HUB-21: TASK 4 — BATCH QUEUE PROCESSING                   ║
-// ║  Verifikasi queue/batch behavior — ingestion + transitions  ║
+// ║  HUB-22: TASK 3 — REAL BATCH QUEUE INTEGRATION             ║
+// ║  Queue wired to webhook inbound — real event → transition   ║
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ─── IN-MEMORY BATCH QUEUE ────────────────────────────────────
+// NOTE: Ephemeral — survives Workers instance lifetime only.
+// HUB-22 HONEST CLASSIFICATION: Queue is CONTROLLED_VERIFIED via test path.
+// Full LIVE_VERIFIED requires persistent external event flowing
+// through the secured webhook endpoint.
 type BatchItemStatus = 'pending' | 'processing' | 'approved' | 'sent' | 'failed'
 
 interface BatchQueueItem {
@@ -937,13 +1106,20 @@ interface BatchQueueItem {
   source: string
   payload: unknown
   received_at: string
+  // Queue state machine
   status: BatchItemStatus
   status_history: { status: BatchItemStatus; at: string; note: string }[]
   processed_at: string | null
   failure_reason: string | null
+  // HUB-22: provenance — was this item from a real webhook event or test?
+  origin: 'webhook_inbound' | 'test_scenario' | 'direct_ingest'
+  // HUB-22: audit trace
+  audit_trace: string[]
 }
 
 const batchQueue: BatchQueueItem[] = []
+
+// ─── CORE QUEUE FUNCTIONS ────────────────────────────────────
 
 function batchQueueAccept(event: {
   event_id: string
@@ -951,31 +1127,57 @@ function batchQueueAccept(event: {
   source: string
   payload: unknown
   received_at: string
+  origin?: BatchQueueItem['origin']
 }): BatchQueueItem {
   const item: BatchQueueItem = {
-    ...event,
+    event_id: event.event_id,
+    event_type: event.event_type,
+    source: event.source,
+    payload: event.payload,
+    received_at: event.received_at,
     status: 'pending',
-    status_history: [{ status: 'pending', at: event.received_at, note: 'Accepted from webhook inbound handler' }],
+    status_history: [{
+      status: 'pending',
+      at: event.received_at,
+      note: `Accepted from ${event.origin ?? 'webhook_inbound'}`
+    }],
     processed_at: null,
-    failure_reason: null
+    failure_reason: null,
+    origin: event.origin ?? 'webhook_inbound',
+    audit_trace: [
+      `[${event.received_at}] ACCEPTED — origin: ${event.origin ?? 'webhook_inbound'}, event_type: ${event.event_type}`
+    ]
   }
   batchQueue.push(item)
+  // Cap at 100 items — ephemeral store
   if (batchQueue.length > 100) batchQueue.shift()
   return item
 }
 
-function batchQueueTransition(eventId: string, newStatus: BatchItemStatus, note: string): BatchQueueItem | null {
+function batchQueueTransition(
+  eventId: string,
+  newStatus: BatchItemStatus,
+  note: string
+): BatchQueueItem | null {
   const item = batchQueue.find(i => i.event_id === eventId)
   if (!item) return null
+
+  const prevStatus = item.status
   item.status = newStatus
-  item.status_history.push({ status: newStatus, at: new Date().toISOString(), note })
+
+  const at = new Date().toISOString()
+  item.status_history.push({ status: newStatus, at, note })
+  item.audit_trace.push(`[${at}] TRANSITION ${prevStatus} → ${newStatus}: ${note}`)
+
   if (newStatus === 'sent' || newStatus === 'approved') {
-    item.processed_at = new Date().toISOString()
+    item.processed_at = at
   }
   if (newStatus === 'failed') {
     item.failure_reason = note
-    item.processed_at = new Date().toISOString()
+    item.processed_at = at
+    item.audit_trace.push(`[${at}] FAILED: ${note}`)
   }
+
   return item
 }
 
@@ -986,19 +1188,45 @@ sovereign.get('/api/queue/status', (c) => {
   }
   batchQueue.forEach(i => { statusCounts[i.status]++ })
 
+  // HUB-22: Distinguish real webhook items from test items
+  const realItems = batchQueue.filter(i => i.origin === 'webhook_inbound').length
+  const testItems = batchQueue.filter(i => i.origin === 'test_scenario').length
+
+  // Honest classification
+  const classification = (() => {
+    if (batchQueue.length === 0) return 'PENDING — no items in queue yet'
+    if (realItems > 0) return `PARTIAL — ${realItems} real webhook event(s) queued, ${testItems} test items. Awaiting full transition verification from live external input.`
+    return `CONTROLLED_VERIFIED — ${testItems} controlled test item(s) only. No real external events yet. Send webhook to /api/webhook/inbound to trigger real queue.`
+  })()
+
   return c.json({
     success: true,
     data: {
       queue_depth: batchQueue.length,
+      real_webhook_items: realItems,
+      test_items: testItems,
       status_summary: statusCounts,
-      items: batchQueue.slice(-10).reverse(),  // Most recent 10
-      verification_note: 'HONEST CLASSIFICATION: Batch queue is STRUCTURE-VERIFIED (pending/processing/approved/sent/failed states implemented). Full E2E processing depends on external event sources. Current queue uses in-memory store (ephemeral).',
-      classification: batchQueue.length > 0 ? 'PARTIAL — queue has items, processing flow verified via test scenarios' : 'PENDING — no items in queue yet'
+      items: batchQueue.slice(-10).reverse().map(i => ({
+        event_id: i.event_id,
+        event_type: i.event_type,
+        source: i.source,
+        origin: i.origin,
+        status: i.status,
+        received_at: i.received_at,
+        processed_at: i.processed_at,
+        status_history: i.status_history
+      })),
+      classification,
+      // HUB-22 honest persistence note
+      persistence_note: 'EPHEMERAL: Queue uses in-memory store. Items lost on Cloudflare Worker restart/cold start. For production durability, wire to D1 or KV.',
+      verification_note: realItems > 0
+        ? `PARTIAL: ${realItems} real webhook item(s) in queue. Status transitions verified. Full LIVE_VERIFIED when a validated event completes full pending→sent cycle.`
+        : 'CONTROLLED_VERIFIED: All state transitions verified via test. Wire external event source to achieve LIVE_VERIFIED.'
     }
   })
 })
 
-// ─── POST: QUEUE PROCESS (Simulate transition) ────────────────
+// ─── POST: QUEUE PROCESS (Manual transition) ─────────────────
 sovereign.post('/api/queue/process', async (c) => {
   let body: { event_id?: string; action?: string; note?: string }
   try { body = await c.req.json() } catch { body = {} }
@@ -1019,7 +1247,12 @@ sovereign.post('/api/queue/process', async (c) => {
     }, 400)
   }
 
-  const updated = batchQueueTransition(event_id, action as BatchItemStatus, note || `Manual transition to ${action}`)
+  const updated = batchQueueTransition(
+    event_id,
+    action as BatchItemStatus,
+    note || `Manual transition to ${action} via /api/queue/process`
+  )
+
   if (!updated) {
     return c.json({
       success: false,
@@ -1031,36 +1264,45 @@ sovereign.post('/api/queue/process', async (c) => {
     success: true,
     data: {
       event_id,
+      origin: updated.origin,
       new_status: updated.status,
       status_history: updated.status_history,
-      verification_note: 'State transition applied. Queue processing path verified.'
+      audit_trace: updated.audit_trace,
+      // HUB-22 classification
+      classification: updated.origin === 'webhook_inbound'
+        ? 'PARTIAL — real webhook item transitioned. Full LIVE_VERIFIED when complete cycle confirmed from validated external event.'
+        : 'CONTROLLED_VERIFIED — test item transitioned. State machine verified.'
     }
   })
 })
 
-// ─── POST: QUEUE TEST SCENARIO (Controlled verification) ──────
-// HUB-21: Produces a controlled verification artifact without needing external caller
+// ─── POST: QUEUE TEST SCENARIO (Controlled E2E verification) ──
+// HUB-22: Produces a controlled verification artifact.
+// Distinct from real events via origin='test_scenario'.
+// Does NOT count toward LIVE_VERIFIED — honest classification only.
 sovereign.post('/api/queue/test', async (c) => {
   const testEventId = `test-${Date.now()}`
-  const testScenario = [
-    { action: 'pending' as BatchItemStatus, note: 'Test scenario initiated' },
-    { action: 'processing' as BatchItemStatus, note: 'Picked up for processing' },
-    { action: 'approved' as BatchItemStatus, note: 'Approved after validation' },
-    { action: 'sent' as BatchItemStatus, note: 'Dispatched to downstream handler' }
-  ]
+  const startAt = new Date().toISOString()
 
-  // Create test item
+  // Create test item with explicit origin
   batchQueueAccept({
     event_id: testEventId,
-    event_type: 'test.verification',
-    source: 'hub21.queue.test',
-    payload: { scenario: 'controlled_verification', hub: 'HUB-21' },
-    received_at: new Date().toISOString()
+    event_type: 'test.hub22.verification',
+    source: 'hub22.queue.test',
+    payload: { scenario: 'controlled_e2e_verification', hub: 'HUB-22' },
+    received_at: startAt,
+    origin: 'test_scenario'
   })
 
-  // Run transitions (skip pending — already set on accept)
+  // Run full state machine: pending → processing → approved → sent
+  const steps: Array<{ action: BatchItemStatus; note: string }> = [
+    { action: 'processing', note: 'Picked up for processing — controlled test' },
+    { action: 'approved', note: 'Approved after validation — controlled test' },
+    { action: 'sent', note: 'Dispatched to downstream — controlled test' }
+  ]
+
   const transitions: { status: BatchItemStatus; at: string; note: string }[] = []
-  for (const step of testScenario.slice(1)) {
+  for (const step of steps) {
     const updated = batchQueueTransition(testEventId, step.action, step.note)
     if (updated) {
       transitions.push(updated.status_history[updated.status_history.length - 1])
@@ -1074,13 +1316,17 @@ sovereign.post('/api/queue/test', async (c) => {
     data: {
       test_event_id: testEventId,
       final_status: finalItem?.status,
+      origin: 'test_scenario',
       status_history: finalItem?.status_history,
+      audit_trace: finalItem?.audit_trace,
       verification_artifact: {
         scenario: 'controlled_end_to_end',
         transitions_completed: transitions.length,
         states_verified: ['pending', 'processing', 'approved', 'sent'],
         all_states_reachable: true,
-        classification: 'CONTROLLED_VERIFIED — all state transitions work. Pending real external event for LIVE_VERIFIED.'
+        // HUB-22 honest classification
+        classification: 'CONTROLLED_VERIFIED — all state transitions work. This is a test event (origin=test_scenario). Send a real webhook event to /api/webhook/inbound to achieve LIVE_VERIFIED.',
+        next_action: 'POST to /api/webhook/inbound with { event_type, source } to trigger a real queue item from a live external event.'
       }
     }
   })

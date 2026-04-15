@@ -717,6 +717,25 @@ function generateTextPack(
     lines.push('')
   }
 
+  // ── HUB-22: LIVE INTEGRATION STATUS ─────────────────────────
+  lines.push('─── HUB-22: LIVE INTEGRATION STATUS ─────────────────────')
+  lines.push('System Version:   1.4.0 | Build Session: hub22')
+  lines.push('Webhook Handler:  /sovereign/api/webhook/inbound')
+  lines.push('  Validation:     WEBHOOK_SECRET-aware (VALIDATED / INVALID_TOKEN / MISSING_TOKEN / SECRET_NOT_CONFIGURED)')
+  lines.push('  Current State:  PARTIAL — endpoint live, WEBHOOK_SECRET must be configured in Cloudflare to achieve VALIDATED')
+  lines.push('  Configure via:  npx wrangler pages secret put WEBHOOK_SECRET --project-name lane-eco-budget-control')
+  lines.push('Batch Queue:      /sovereign/api/queue/status')
+  lines.push('  States:         pending → processing → approved → sent / failed')
+  lines.push('  Origin:         webhook_inbound (real) | test_scenario (controlled)')
+  lines.push('  Current State:  CONTROLLED_VERIFIED — all transitions verified. Send real webhook event for LIVE_VERIFIED.')
+  lines.push('Audit Log:        /sovereign/api/webhook/log (no token values exposed)')
+  lines.push('Next Action:      1. Configure WEBHOOK_SECRET in Cloudflare Pages secrets')
+  lines.push('                  2. Send POST to /sovereign/api/webhook/inbound with X-Webhook-Token')
+  lines.push('                  3. Verify token_result=VALIDATED in response')
+  lines.push('                  4. Confirm queue item created with origin=webhook_inbound')
+  lines.push('                  5. Transition item to sent — full E2E LIVE_VERIFIED achieved')
+  lines.push('')
+
   lines.push('==============================')
   lines.push('END OF MASTER ARCHITECT CONTEXT PACK')
   lines.push('==============================')

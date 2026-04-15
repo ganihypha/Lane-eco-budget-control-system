@@ -1,6 +1,6 @@
 // ============================================================
 // LANE-ECO BUDGET CONTROL SYSTEM — Main Entry Point
-// HUB-20: Persistent Sovereign Intake Storage + Boot Restore
+// HUB-22: Webhook Secret Hardening + Live Integration
 // Internal operational tool: Session/Lane/Ecosystem Budget Control
 // Stack: Hono + TypeScript + Cloudflare Pages + D1
 // ============================================================
@@ -20,6 +20,9 @@ import { initSovereignDB, getSovereignBootStatus } from './lib/sovereign'
 
 type Bindings = {
   SOVEREIGN_DB: D1Database
+  // HUB-22: Webhook secret for inbound validation
+  // Configure via: npx wrangler pages secret put WEBHOOK_SECRET --project-name lane-eco-budget-control
+  WEBHOOK_SECRET?: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -36,6 +39,10 @@ app.use('*', async (c, next) => {
   // The initSovereignDB call is idempotent — only runs full restore once.
   if (c.env?.SOVEREIGN_DB) {
     await initSovereignDB(c.env.SOVEREIGN_DB)
+  }
+  // HUB-22: Forward WEBHOOK_SECRET to request context for sovereign route access
+  if (c.env?.WEBHOOK_SECRET) {
+    c.set('WEBHOOK_SECRET' as never, c.env.WEBHOOK_SECRET)
   }
   await next()
 })
@@ -78,10 +85,12 @@ app.get('/health', async (c) => {
           '/sovereign/api/webhook/inbound', '/sovereign/api/queue/status'
         ]
       },
-      version: '1.3.1',
-      build_session: 'hub21',
+      version: '1.4.0',
+      build_session: 'hub22',
       persistence: bootStatus.storage_mode,
-      repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git'
+      repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git',
+      // HUB-22: Webhook secret configuration status (never expose actual secret value)
+      webhook_secret_configured: !!(c.env?.WEBHOOK_SECRET)
     }
   })
 })
