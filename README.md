@@ -1,16 +1,17 @@
 # Lane-Eco Budget Control System
 
-**Version:** 1.2.0 | **Build Session:** HUB-18 | **Status:** ✅ LIVE-VERIFIED
+**Version:** 1.2.1 | **Build Session:** HUB-19 | **Status:** ✅ LIVE-VERIFIED
 
-Internal operational tool for managing session, lane, and ecosystem budgets — with Sovereign Source Intake for canonical truth grounding.
+Internal operational tool for session, lane, ecosystem budget management — with truth-mature Sovereign Source Intake for canonical truth grounding.
 
 ---
 
 ## Live URLs
+
 - **Production:** https://lane-eco-budget-control.pages.dev
 - **Prompt Bridge:** https://lane-eco-budget-control.pages.dev/bridge
 - **Sovereign Intake:** https://lane-eco-budget-control.pages.dev/sovereign
-- **GitHub Repo:** https://github.com/ganihypha/Lane-eco-budget-control-system
+- **GitHub:** https://github.com/ganihypha/Lane-eco-budget-control-system
 
 ---
 
@@ -23,21 +24,26 @@ Internal operational tool for managing session, lane, and ecosystem budgets — 
 | Lanes | `/lanes` | Lane health + budget rollup |
 | Ecosystem | `/ecosystem` | Total cap, freeze rules, pressure level |
 | Decision Log | `/decisions` | Historical go/stop/freeze decisions |
-| Prompt Bridge | `/bridge` | Generate Master Architect Context Pack |
-| Sovereign Intake | `/sovereign` | Ingest canonical current-handoff truth |
+| Prompt Bridge | `/bridge` | Generate Master Architect Context Pack (truth-grounded) |
+| Sovereign Intake | `/sovereign` | Ingest canonical current-handoff + truth-maturity analysis |
 
 ---
 
 ## Architecture
 
 ```
-Sovereign Source (P1 current-handoff)
+Sovereign Source (P1 current-handoff)          ← canonical truth
          ↓
 Budget Controller App (P3 — operational truth surface)
          ↓
 Prompt Bridge (context export + pack generator)
          ↓
-Master Architect Context Pack (17 sections, sovereign-grounded)
+Master Architect Context Pack (truth-mature, 17+ sections)
+   - Truth Maturity badge: NONE/LOW/MEDIUM/HIGH
+   - Per-field provenance: [canonical_truth P1] / [controller_fallback P3]
+   - Governance frozen: IMMUTABLE label
+   - Extraction completeness summary
+   - Merge diagnostics panel
          ↓
 Master Architect Prompt → AI Dev Executor
          ↓
@@ -45,6 +51,7 @@ Closeout Ingest → Back to App
 ```
 
 ### Truth Precedence (P1 > P2 > P3 > P4 > P5)
+
 | Level | Source | Description |
 |---|---|---|
 | P1 | current-handoff | Canonical operating truth (highest) |
@@ -55,126 +62,96 @@ Closeout Ingest → Back to App
 
 ---
 
-## Sovereign Source Intake (HUB-18)
+## Sovereign Source Intake — HUB-19 (Truth-Maturity Upgrade)
 
-**Purpose:** Ground the Prompt Bridge in real canonical truth from `current-handoff` documents instead of relying on controller state alone.
+### Parser Capabilities (Section-Aware)
 
-### Layers
-- **Layer A — Ingestion:** `ingestSovereignSource(docId, docType, rawMarkdown)`
-- **Layer B — Normalization:** Extract session, module, governance, repo, secret, next-move truth from markdown
-- **Layer C — Bridge Store Sync:** `syncSovereignIntakeToBridgeStore()` — persists without overwriting controller
-- **Layer D — Pack Merge:** `mergeSovereignTruthWithControllerState()` — applies P1-P5 precedence
+All session block patterns supported:
+```
+SESSION 4G                    # bare SESSION with alphanumeric ID
+## SESSION 4A                 # heading-based
+## 🚀 SESSION 4B              # emoji + heading
+## SESSION 4A — HUB-18        # compound heading
+HUB-17, HUB-18, SES-01       # hub/ses prefixed
+```
 
-### Status Normalization Enums
-`verified_ready_to_close` | `build_verified` | `live_verified` | `route_verified` | `closed_verified` | `complete_synced` | `partial` | `blocked` | `active` | `planned`
+Status normalization:
+```
+STATUS: VERIFIED & CLOSED       → closed_verified
+STATUS: LIVE-VERIFIED           → live_verified
+STATUS: DEPLOYED AND E2E VERIFIED → e2e_verified
+STATUS: BUILD-VERIFIED          → build_verified
+STATUS: VERIFIED AND READY TO CLOSE → verified_ready_to_close
+STATUS: PARTIAL                 → partial
+STATUS: BLOCKED                 → blocked
+```
 
-### Governance Rule
-If `canon_status = frozen` (from P1 source), governance fields are **immutable** — no lower-precedence source can override.
+Repo/Deploy truth patterns:
+```
+Repo: <url>
+Production: <url>
+Cloudflare: <host>
+Live URL: <url>
+GitHub: <url>
+build_session: hubXX
+```
 
----
+### Evidence-Based Confidence Scoring (7 Dimensions)
 
-## API Endpoints (17 verified)
+| Dimension | Meaning |
+|---|---|
+| valid_source_type | doc_type = current-handoff or active-priority |
+| session_blocks_found | ≥1 session block extracted |
+| governance_found | Governance Canon section found |
+| repo_deploy_found | Repo/live URL found |
+| next_move_found | Next Locked Move / Suggested scope found |
+| module_truth_found | Module/route table found |
+| conflicts_resolved_cleanly | No unresolved conflicts |
 
-### Core
-- `GET /` — Dashboard
-- `GET /sessions` — Session list
-- `GET /lanes` — Lane list
-- `GET /ecosystem` — Ecosystem state
-- `GET /decisions` — Decision log
-- `GET /health` — Health check (version, modules, endpoints)
+Scoring: HIGH=5+/7, MEDIUM=3-4/7, LOW=1-2/7, NONE=0/7
 
-### Prompt Bridge
-- `GET /bridge` — Bridge UI
-- `GET /bridge/api/pack?session=SESSION_ID` — Generate Master Architect Pack
-- `GET /bridge/api/ecosystem` — Ecosystem context
-- `GET /bridge/api/repo` — Repo authority context
-- `GET /bridge/api/session?id=SESSION_ID` — Session context
-- `GET /bridge/api/lane?id=LANE_ID` — Lane context
-- `GET /bridge/api/decisions?type=session&id=X` — Decision summary
-- `POST /bridge/api/ingest` — Ingest execution closeout (JSON)
-- `POST /bridge/ingest` — Ingest closeout (form)
+### URL Sanitization
 
-### Sovereign Intake
-- `GET /sovereign` — Sovereign Intake UI
-- `POST /sovereign/api/ingest` — Ingest raw markdown `{ doc_id, doc_type, content }`
-- `GET /sovereign/api/summary` — Intake summary + active source status
-- `GET /sovereign/api/payload?id=DOC_ID` — Full normalized payload
-- `GET /sovereign/api/list` — List all ingested documents
-- `GET /sovereign/api/sessions?id=DOC_ID` — Extracted session truth
-- `GET /sovereign/api/governance` — Governance/canon truth
-- `GET /sovereign/api/merge?session=SESSION_ID` — Merged truth context
-- `GET /sovereign/api/normalize?status=TEXT` — Normalize status string
-- `GET /sovereign/api/raw?id=DOC_ID` — Raw document text
-- `POST /sovereign/api/clear` — Clear intake store
+- `safe_source_id` = doc_id only, never a URL or endpoint
+- `_restricted_endpoints_redacted: true` always set
+- tokenized/webhook/preview-hash URLs filtered from evidence_links
+- Separated concepts: source_doc_id, canonical_product_repo, canonical_live_url, evidence_urls, (restricted never rendered)
 
----
+### Fallback Rendering Honesty
 
-## Data Architecture
-
-**Persistence:** In-memory (resets on redeploy)
-
-**Domain Model:**
-- `Session` — planned/hard_cap/actual BU, status, blocker, signals
-- `Lane` — budget rollup, health (healthy/watch/overloaded/frozen)
-- `Ecosystem` — total cap, freeze rules, pressure level
-- `DecisionLog` — go/stop/freeze/split history
-- `SovereignIntakePayload` — normalized doc truth (source_meta, session_truth, governance_truth, repo_truth, etc.)
-
-**Budget Logic:**
-- Cap Status: safe (<80%) / warning (80-99%) / exceeded (≥100%)
-- Signals: GO / WATCH / STOP
+Text pack uses explicit labels:
+- `[canonical_truth (P1 — doc-id)]` — field from P1 source
+- `[controller_fallback (P3 hardcoded)]` — P3 fallback applied
+- `unresolved — not found in canonical source` — instead of silent null
+- `FROZEN 🔒 (IMMUTABLE)` — for immutable governance canon
 
 ---
 
-## User Guide
+## How to Use
 
-### Ingest current-handoff
-1. Open https://lane-eco-budget-control.pages.dev/sovereign
-2. Enter Document ID (e.g. `current-handoff-2026-04-15`)
-3. Select type: `current-handoff (P1 — Canonical)`
-4. Paste raw markdown content
-5. Click **Ingest Document**
-
-### Generate Grounded Context Pack
-1. Open https://lane-eco-budget-control.pages.dev/bridge
-2. Check Sovereign Source banner (should show active P1 source)
-3. Select target session
-4. Click **Generate Context Pack**
-5. Copy and paste into Master Architect Prompt conversation
-
-### Ingest Execution Closeout
-After AI Dev completes work:
-1. Open `/bridge` → **Ingest Execution Closeout** form
-2. Fill session ID, final status, actual burn, output
-3. Submit → closes planning→execution loop
+1. **Ingest current-handoff**: Open `/sovereign`, paste raw markdown, select `current-handoff (P1)`, click **Ingest & Parse Document**
+2. **Check truth maturity**: Badge shows NONE/LOW/MEDIUM/HIGH + 7-dimension score
+3. **Review extraction completeness**: Grid shows what was/wasn't found
+4. **Check merge diagnostics**: canonical fields vs fallback fields vs unresolved
+5. **Generate pack**: Open `/bridge` → sovereign banner shows maturity → click **Generate Context Pack**
+6. **Copy pack**: Text pack has per-field provenance — safe to paste to AI sessions
+7. **Closeout**: After AI Dev work, ingest closeout at `/bridge` to close the loop
 
 ---
 
 ## Deployment
 
-| Item | Status |
-|---|---|
-| Platform | Cloudflare Pages |
-| Build | ✅ 185.34 kB (48 modules) |
-| GitHub | ✅ ganihypha/Lane-eco-budget-control-system (main) |
-| Live | ✅ LIVE-VERIFIED (17/17 routes 200 OK) |
-| Last Deploy | HUB-18 (2026-04-15) |
+- **Platform:** Cloudflare Pages (edge-deployed, global)
+- **Status:** ✅ LIVE-VERIFIED
+- **Tech Stack:** Hono + TypeScript + TailwindCSS CDN
+- **Last Updated:** 2026-04-15 (HUB-19)
+- **GitHub:** https://github.com/ganihypha/Lane-eco-budget-control-system
 
----
+## Sessions History
 
-## Session History
-
-| Session | Scope | Status | Build |
-|---|---|---|---|
-| HUB-16 | Budget Controller MVP Greenfield | LIVE-VERIFIED ✅ | v1.0.0 |
-| HUB-17 | Prompt Bridge v1.0 (Phase A+B+C) | LIVE-VERIFIED ✅ | v1.1.0 |
-| HUB-18 | Sovereign Source Intake v1.0 (Phase D) | LIVE-VERIFIED ✅ | v1.2.0 |
-
----
-
-## Next Possible Steps (Optional)
-
-1. **Cloudflare D1 Persistence** — swap in-memory BudgetStore for D1 SQLite
-2. **BarberKas Lane Sessions** — start tracking sessions in lane-002
-3. **Supabase Integration** — external persistence for sovereignty across restarts
-4. **Automated Doc Fetch** — fetch `current-handoff` from GitHub repo on load
+| Session | Status | Description |
+|---|---|---|
+| HUB-16 | LIVE-VERIFIED | Budget Controller MVP greenfield build |
+| HUB-17 | LIVE-VERIFIED | Prompt Bridge v1.0 Phase A+B+C |
+| HUB-18 | LIVE-VERIFIED | Sovereign Source Intake v1.0 |
+| HUB-19 | LIVE-VERIFIED | Truth-Maturity Upgrade — section-aware parser + evidence-based confidence |
