@@ -1,6 +1,6 @@
 # Lane-Eco Budget Control System
 
-**Version:** 1.3.0 | **Build Session:** HUB-20 | **Status:** ✅ LIVE-VERIFIED
+**Version:** 1.3.1 | **Build Session:** HUB-21 | **Status:** ✅ LIVE-VERIFIED
 
 Internal operational tool for session, lane, ecosystem budget management — with truth-mature Sovereign Source Intake and **persistent D1 storage** for canonical truth grounding that survives restarts and redeployment.
 
@@ -65,6 +65,38 @@ Closeout Ingest → Back to App
 | P3 | live controller | Budget Controller state (budget, sessions, lanes) |
 | P4 | repo/deploy | Repo + live URL truth |
 | P5 | notes/manual | Low-weight conversational context |
+
+---
+
+## HUB-21 Upgrade (Final Hardening + Webhook + Batch Queue)
+
+### What was upgraded
+
+1. **Final Truth-Layer Cleanup**
+   - `session_status_override`: disambiguate `not_applicable` (no session_id requested) vs `unresolved` (session not in P1 doc)
+   - New field `session_status_override_note` in `MergedTruthContext` for clear diagnostics
+   - Pack text: sharper diagnostics section — priority_order always shown, clean/all-resolved label
+   - `bridge.ts`: only pass session_id to merge if explicitly requested (fixes auto-pick misleading warning)
+   - `unresolved_fields: []` when no session_id provided (correct — `not_applicable` ≠ `unresolved`)
+
+2. **Cold Boot Consistency**
+   - Added `init_complete` + `boot_consistency` flags to `/health` endpoint
+   - `/health` and `/sovereign/api/summary` guaranteed consistent (same `sovereignStore` singleton)
+   - Cold boot test: P1 auto-restored after restart, both endpoints report identical state
+
+3. **Webhook Inbound Handler (STRUCTURE_VERIFIED)**
+   - `POST /sovereign/api/webhook/inbound` — validates structure, logs event, hands off to queue
+   - `GET /sovereign/api/webhook/log` — event log with honest classification
+   - Honest classification: `STRUCTURE_VERIFIED` | `PARTIAL` (token present, no secret configured) | `REJECTED`
+
+4. **Batch Queue Processing (CONTROLLED_VERIFIED)**
+   - `GET /sovereign/api/queue/status` — queue depth + status breakdown
+   - `POST /sovereign/api/queue/process` — manual state transitions
+   - `POST /sovereign/api/queue/test` — controlled end-to-end scenario artifact
+   - States verified: `pending → processing → approved → sent` + `failed` path
+   - Honest: `CONTROLLED_VERIFIED`, pending `LIVE_VERIFIED` from real external caller
+
+5. **Version bump:** 1.3.0 → 1.3.1 | build_session: hub21
 
 ---
 
