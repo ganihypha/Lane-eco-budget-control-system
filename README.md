@@ -74,6 +74,10 @@ npx wrangler pages project create lane-eco-budget-control-system --production-br
 npx wrangler pages deploy dist --project-name lane-eco-budget-control-system
 ```
 
+## URLs
+- **Production**: https://lane-eco-budget-control.pages.dev
+- **GitHub Repo**: https://github.com/ganihypha/Lane-eco-budget-control-system
+
 ## Current Status
 - ✅ All 5 modules operational (Dashboard, Sessions, Lanes, Ecosystem, Decisions)
 - ✅ Full CRUD: Sessions, Lanes, Ecosystem config
@@ -84,13 +88,11 @@ npx wrangler pages deploy dist --project-name lane-eco-budget-control-system
 - ✅ Recommended actions engine
 - ✅ Decision log with entity linking
 - ✅ Quick status actions (mark done/blocked/frozen/cancelled)
-- ✅ BUILD-VERIFIED (local, 12/12 routes pass)
+- ✅ LIVE on Cloudflare Pages — 8/8 routes verified
+- ✅ GitHub pushed → ganihypha/Lane-eco-budget-control-system (main)
 - ⏳ Persistence: In-memory (upgrade to Cloudflare D1 when needed)
-- ⏳ GitHub push: Pending auth setup
-- ⏳ Cloudflare deploy: Pending API token
 
 ## Next Locked Move (Post-HUB-16)
-1. Setup GitHub auth → push to `ganihypha/Lane-eco-budget-control-system`
-2. Setup Cloudflare API token → deploy to Cloudflare Pages
-3. Optional: Add D1 persistence for data survival across restarts
-4. Optional: BarberKas lane becomes first real use case
+1. Optional: Add D1 persistence for data survival across restarts
+2. Optional: BarberKas lane becomes first real use case
+3. Optional: Supabase/D1 migration for full persistence
