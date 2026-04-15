@@ -1,12 +1,69 @@
+// ============================================================
+// LANE-ECO BUDGET CONTROL SYSTEM — Main Entry Point
+// SESSION HUB-16: Greenfield Build
+// Internal operational tool: Session/Lane/Ecosystem Budget Control
+// Stack: Hono + TypeScript + Cloudflare Pages
+// ============================================================
+
 import { Hono } from 'hono'
-import { renderer } from './renderer'
+import { serveStatic } from 'hono/cloudflare-workers'
+import dashboard from './routes/dashboard'
+import sessions from './routes/sessions'
+import lanes from './routes/lanes'
+import ecosystem from './routes/ecosystem'
+import decisions from './routes/decisions'
 
 const app = new Hono()
 
-app.use(renderer)
+// ─── STATIC ─────────────────────────────────────────────────
+app.use('/static/*', serveStatic({ root: './public' }))
 
-app.get('/', (c) => {
-  return c.render(<h1>Hello!</h1>)
+// ─── HEALTH ─────────────────────────────────────────────────
+app.get('/health', (c) => {
+  return c.json({
+    success: true,
+    data: {
+      service: 'Lane-Eco Budget Control System',
+      build_session: 'hub16',
+      version: '1.0.0',
+      status: 'operational',
+      timestamp: new Date().toISOString(),
+      modules: ['dashboard', 'sessions', 'lanes', 'ecosystem', 'decisions'],
+      persistence: 'in-memory',
+      repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git'
+    }
+  })
+})
+
+// ─── ROUTES ─────────────────────────────────────────────────
+app.route('/', dashboard)
+app.route('/sessions', sessions)
+app.route('/lanes', lanes)
+app.route('/ecosystem', ecosystem)
+app.route('/decisions', decisions)
+
+// ─── 404 ────────────────────────────────────────────────────
+app.notFound((c) => {
+  return c.html(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8"/>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>404 — Budget Controller</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <style>body { background: #0f172a; color: #e2e8f0; }</style>
+    </head>
+    <body class="flex items-center justify-center min-h-screen">
+      <div class="text-center">
+        <div class="text-8xl font-bold text-slate-700 mb-4">404</div>
+        <h1 class="text-xl font-bold text-white mb-2">Page Not Found</h1>
+        <p class="text-slate-500 mb-6">The route you requested doesn't exist.</p>
+        <a href="/" class="inline-block bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700">← Dashboard</a>
+      </div>
+    </body>
+    </html>
+  `, 404)
 })
 
 export default app
