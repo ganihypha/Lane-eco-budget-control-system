@@ -76,9 +76,9 @@ bridge.get('/', (c) => {
     <!-- Header -->
     <div class="flex items-center justify-between mb-6">
       <div>
-        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Prompt Bridge</div>
-        <h1 class="text-2xl font-bold text-white">Master Architect Context Generator</h1>
-        <p class="text-sm text-slate-400 mt-1">Convert live operational truth into a structured context pack for Master Architect / AI Dev sessions.</p>
+        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Sovereign-Grounded Prompt Gateway</div>
+        <h1 class="text-2xl font-bold text-white">Master Architect Context Pack Generator</h1>
+        <p class="text-sm text-slate-400 mt-1">Export sovereign-grounded, truth-mature context packs for Master Architect / downstream AI executor sessions.</p>
       </div>
       <div class="text-right">
         <div class="text-xs text-slate-500 mb-1">Ecosystem Status</div>
@@ -129,27 +129,29 @@ bridge.get('/', (c) => {
     </div>`
     })()}
 
-    <!-- Architecture Info Banner -->
+    <!-- Platform Identity + Architecture Banner -->
     <div class="card p-4 mb-6" style="border-color:#1d4ed8;background:rgba(29,78,216,0.08)">
       <div class="flex items-start gap-3">
         <i class="fas fa-diagram-project text-blue-400 mt-0.5"></i>
-        <div>
-          <div class="text-sm font-semibold text-blue-300 mb-1">Architecture Flow</div>
-          <div class="text-xs text-slate-400">
-            <span class="text-violet-300 font-semibold">Sovereign Source (P1)</span>
-            <span class="text-slate-600 mx-2">→</span>
-            <span class="text-white">Budget Controller App</span>
-            <span class="text-slate-600 mx-2">→</span>
-            <span class="text-blue-300 font-semibold">Prompt Bridge</span>
-            <span class="text-slate-600 mx-2">→</span>
-            <span class="text-white">Master Architect Context Pack</span>
-            <span class="text-slate-600 mx-2">→</span>
-            <span class="text-white">Master Architect Prompt</span>
-            <span class="text-slate-600 mx-2">→</span>
-            <span class="text-white">AI Dev Executor</span>
-            <span class="text-slate-600 mx-2">→</span>
-            <span class="text-white">Closeout → Back to App</span>
+        <div class="w-full">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="text-sm font-semibold text-blue-300">Sovereign-Grounded Operational Prompt Gateway</div>
+            <span class="text-xs px-2 py-0.5 rounded" style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3)">v1.6.0 / hub24</span>
           </div>
+          <div class="text-xs text-slate-400 mb-2">
+            <span class="text-violet-400 font-semibold">[1] Sovereign Intake</span>
+            <span class="text-slate-600 mx-1 text-xs">canonical truth ingress</span>
+            <span class="text-slate-600 mx-2">→</span>
+            <span class="text-white">[2] Budget Controller</span>
+            <span class="text-slate-600 mx-1 text-xs">operational surface</span>
+            <span class="text-slate-600 mx-2">→</span>
+            <span class="text-blue-300 font-semibold">[3] Prompt Bridge</span>
+            <span class="text-slate-600 mx-1 text-xs">gateway layer</span>
+            <span class="text-slate-600 mx-2">→</span>
+            <span class="text-white">[4] Master Architect / AI Dev</span>
+            <span class="text-slate-600 mx-1 text-xs">execution consumer</span>
+          </div>
+          <div class="text-xs text-slate-500">This is not a generic dashboard. It is a sovereign-grounded prompt gateway where P1 current-handoff is the canonical truth authority.</div>
         </div>
       </div>
     </div>

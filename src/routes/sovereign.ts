@@ -1,6 +1,7 @@
 // ============================================================
 // SOVEREIGN SOURCE INTAKE ROUTE — Lane-Eco Budget Control System
-// HUB-23: Durable Webhook/Queue Audit + Boot Consistency Fix
+// HUB-24: Platform Maturity / Status Integrity Hardening
+// Role: Canonical Truth Ingress layer (P1 current-handoff → D1)
 //
 // Routes:
 //   GET  /sovereign                        → Sovereign Intake UI

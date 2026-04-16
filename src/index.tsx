@@ -1,7 +1,13 @@
 // ============================================================
 // LANE-ECO BUDGET CONTROL SYSTEM — Main Entry Point
-// HUB-23: Durable Webhook/Queue Audit + Boot Consistency Fix
-// Internal operational tool: Session/Lane/Ecosystem Budget Control
+// HUB-24: Platform Maturity / Status Integrity / Prompt-Gateway Hardening
+//
+// Platform Role: Sovereign-Grounded Operational Prompt Gateway
+//   - Sovereign Source Intake: canonical truth ingress (P1 → D1)
+//   - Budget Controller: operational control surface (P3)
+//   - Prompt Bridge: structured context export / gateway layer
+//   - Master Architect / AI Dev: execution consumer layer
+//
 // Stack: Hono + TypeScript + Cloudflare Pages + D1
 // ============================================================
 
@@ -99,8 +105,8 @@ app.get('/health', async (c) => {
           '/sovereign/api/webhook/inbound', '/sovereign/api/queue/status'
         ]
       },
-      version: '1.5.0',
-      build_session: 'hub23',
+      version: '1.6.0',
+      build_session: 'hub24',
       persistence: bootStatus.storage_mode,
       repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git',
       // HUB-22: Webhook secret configuration status (never expose actual secret value)

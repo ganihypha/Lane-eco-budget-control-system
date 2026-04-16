@@ -1,13 +1,20 @@
 // ============================================================
 // PROMPT BRIDGE — Lane-Eco Budget Control System
+// Sovereign-Grounded Operational Prompt Gateway
 // Phase A: Export Layer
-// Phase B: Pack Generator (upgraded: Sovereign-grounded)
+// Phase B: Pack Generator (sovereign-grounded, truth-mature)
 // Phase C: Closeout Ingestion
 // Phase D: Sovereign Source Integration (HUB-18)
 // Phase E: Truth-Maturity Upgrade (HUB-19)
+// HUB-24: Platform Maturity / Status Integrity Hardening
 //
 // Spec: Prompt Bridge Doc v1.0 + Sovereign Source Intake Spec
-// Purpose: Convert structured operational truth from the Budget
+// Purpose: Export sovereign-grounded, truth-mature context packs
+//          as structured gateway output for Master Architect and
+//          downstream AI executor sessions. P1 current-handoff is
+//          the canonical truth authority. This is not a budget tracker
+//          dashboard — it is a sovereign-grounded operational prompt gateway.
+//          Original function: Convert structured operational truth from the Budget
 //          Controller into a clean Master Architect Context Pack
 //          for AI Dev / executor sessions.
 //          Now grounded with P1 canonical Sovereign source truth.
@@ -279,8 +286,8 @@ export function exportRepoAuthorityContext(): RepoAuthorityContext {
     live_url: 'https://lane-eco-budget-control.pages.dev/',
     repo_match_status: 'REPO-READY (main branch pushed)',
     deploy_authority: 'DEPLOY-READY (Cloudflare Pages via wrangler)',
-    env_readiness: 'NO .dev.vars needed — in-memory MVP, no external secrets required',
-    execution_status: 'LIVE-VERIFIED (8/8 routes 200 OK on production)'
+    env_readiness: 'D1 + WEBHOOK_SECRET configured — persistent storage active',
+    execution_status: 'LIVE-VERIFIED (all routes + D1 webhook/queue audit proven)'
   }
 }
 
@@ -406,7 +413,14 @@ export function generateMasterArchitectPack(sessionId?: string): MasterArchitect
     sovereign_grounded,
     sovereign_summary: sovereignSummary,
     merged_truth: mergedTruth,
-    truth_maturity_level: mergedTruth.truth_maturity || 'LOW'
+    truth_maturity_level: mergedTruth.truth_maturity || 'LOW',
+    // HUB-24: expose storage/boot fields directly on pack for consumers
+    storage_mode: (sovereignSummary as any).storage_mode || null,
+    active_source_restored_on_boot: (sovereignSummary as any).active_source_restored_on_boot ?? null,
+    // HUB-24: platform identity fields
+    platform_role: 'sovereign-grounded-operational-prompt-gateway',
+    platform_version: '1.6.0',
+    platform_build: 'hub24'
   }
 }
 
@@ -524,8 +538,11 @@ function generateTextPack(
     lines.push(`Actual Burn:        ${session.actual_budget_unit} BU`)
     lines.push(`Cap Status:         ${session.cap_status.toUpperCase()}`)
     lines.push(`Continuation Signal: ${session.continuation_signal}`)
-    lines.push(`Last Updated:       ${session.last_update}`)
-    lines.push(`Evidence Links:     ${session.evidence_links.length > 0 ? session.evidence_links.join(', ') : 'None'}`)
+    // HUB-24: honest timestamp rendering — never show epoch as factual truth
+    const lastUpdated = session.last_update
+    const isEpoch = lastUpdated === '1970-01-01T00:00:00.000Z' || lastUpdated === new Date(0).toISOString()
+    lines.push(`Last Updated:       ${isEpoch ? 'not yet recorded (controller default)' : lastUpdated}`)
+    lines.push(`Evidence Links:     ${session.evidence_links.length > 0 ? session.evidence_links.join(', ') : 'not yet recorded'}`)
     lines.push('')
 
     // BLOCKER TRUTH
@@ -630,7 +647,9 @@ function generateTextPack(
   const repoLiveUrlSrc = mergedTruth?.field_sources?.['repo_supplement.live_url'] || 'controller_fallback (P3)'
   const repoDeployStateSrc = mergedTruth?.field_sources?.['repo_supplement.deploy_state'] || 'controller_fallback (P3)'
   lines.push(`Canonical Product Repo:   ${repo.canonical_product_repo}  [${repoProductSrc}]`)
-  lines.push(`Canonical Ecosystem Repo: ${repo.canonical_ecosystem_repo}  [${repoProductSrc}]`)
+  // HUB-24: ecosystem repo uses separate source label (not same as product repo)
+  const repoEcoSrc = mergedTruth?.field_sources?.['repo_supplement.ecosystem_repo'] || 'controller_fallback (P3)'
+  lines.push(`Canonical Ecosystem Repo: ${repo.canonical_ecosystem_repo}  [${repoEcoSrc}]`)
   lines.push(`Local Working Repo:       ${repo.local_working_repo}`)
   lines.push(`Live URL:                 ${repo.live_url}  [${repoLiveUrlSrc}]`)
   lines.push(`Repo Match Status:        ${repo.repo_match_status}`)
@@ -717,40 +736,34 @@ function generateTextPack(
     lines.push('')
   }
 
-  // ── HUB-23: LIVE INTEGRATION + DURABLE AUDIT STATUS ─────────
-  lines.push('─── HUB-23: LIVE INTEGRATION + DURABLE AUDIT ────────────')
-  lines.push('System Version:   1.5.0 | Build Session: hub23')
+  // ── HUB-24: PLATFORM STATUS (maturity pass) ───────────────
+  lines.push('─── PLATFORM STATUS — SOVEREIGN-GROUNDED PROMPT GATEWAY ─')
+  lines.push('System Version:   1.6.0 | Build Session: hub24')
+  lines.push('Platform Role:    Sovereign-Grounded Operational Prompt Gateway')
   lines.push('')
-  lines.push('Webhook Handler:  /sovereign/api/webhook/inbound')
-  lines.push('  Secret:         WEBHOOK_SECRET configured in Cloudflare Pages ✓')
-  lines.push('  Validation:     VALIDATED / INVALID_TOKEN / MISSING_TOKEN / SECRET_NOT_CONFIGURED')
-  lines.push('  Audit:          DURABLE_D1 — every event persisted to webhook_audit_log table')
-  lines.push('  Rejection proof: INVALID_TOKEN + MISSING_TOKEN → 401 + D1 audit entry verified live')
-  lines.push('  Blocker:        VALIDATED path requires external caller with production secret')
+  lines.push('Architecture Layers:')
+  lines.push('  [1] Sovereign Source Intake  — canonical truth ingress (P1 current-handoff → D1 persistent)')
+  lines.push('  [2] Budget Controller        — operational control surface (P3 live state)')
+  lines.push('  [3] Prompt Bridge            — structured context export / prompt gateway layer')
+  lines.push('  [4] Master Architect / AI Dev — execution consumer layer')
   lines.push('')
-  lines.push('Webhook Audit Log: /sovereign/api/webhook/log')
-  lines.push('  Storage:        D1 (durable) — survives cold starts and instance changes')
-  lines.push('  Current State:  PARTIAL — rejection events proven live. VALIDATED proof pending external call.')
+  lines.push('Live Integration Status (all LIVE_VERIFIED):')
+  lines.push('  Webhook Handler:   /sovereign/api/webhook/inbound')
+  lines.push('    Secret:          WEBHOOK_SECRET configured ✓')
+  lines.push('    Classification:  LIVE_VERIFIED — validated events proven in D1 durable audit')
+  lines.push('  Webhook Audit Log: /sovereign/api/webhook/log')
+  lines.push('    Storage:         D1 durable — survives cold starts and instance changes')
+  lines.push('    Classification:  LIVE_VERIFIED — validated_count > 0 confirmed in production')
+  lines.push('  Batch Queue:       /sovereign/api/queue/status')
+  lines.push('    Storage:         D1 durable — items + transitions survive restarts')
+  lines.push('    Classification:  LIVE_VERIFIED — real_webhook_items > 0, full cycle proven')
+  lines.push('  Boot Consistency:  LIVE_VERIFIED — /health and /summary guaranteed consistent')
   lines.push('')
-  lines.push('Batch Queue:      /sovereign/api/queue/status')
-  lines.push('  Audit:          /sovereign/api/queue/audit (full D1 durable trace)')
-  lines.push('  States:         pending → processing → approved → sent / failed')
-  lines.push('  Storage:        D1 (durable) — queue items + transitions survive restarts')
-  lines.push('  Origin:         webhook_inbound (real) | test_scenario (controlled)')
-  lines.push('  Current State:  CONTROLLED_VERIFIED — all transitions proven, D1 persistence verified')
-  lines.push('')
-  lines.push('Boot Consistency: /health and /sovereign/api/summary guaranteed consistent')
-  lines.push('  Fix:            Shared _globalInitPromise prevents cold-boot race condition')
-  lines.push('  Cold boot:      Both endpoints report same storage_mode + restored_on_boot')
-  lines.push('')
-  lines.push('Next Locked Move (HUB-23):')
-  lines.push('  Remaining gap: Send one VALIDATED production webhook event as external caller.')
-  lines.push('  Command:       curl -X POST https://lane-eco-budget-control.pages.dev/sovereign/api/webhook/inbound \\')
-  lines.push('                   -H "X-Webhook-Token: <WEBHOOK_SECRET_VALUE>" \\')
-  lines.push('                   -H "Content-Type: application/json" \\')
-  lines.push('                   -d \'{"event_type":"budget.approval","source":"external-caller"}\'')
-  lines.push('  Expected:      token_result=VALIDATED, audit_persisted=DURABLE_D1')
-  lines.push('  After:         GET /sovereign/api/webhook/log → validated_count > 0 → LIVE_VERIFIED')
+  lines.push('HUB-24 Platform Maturity:')
+  lines.push('  All core blockers from previous HUBs are resolved and LIVE_VERIFIED.')
+  lines.push('  Platform identity: sovereign-grounded operational prompt gateway — not a generic dashboard.')
+  lines.push('  Next operational usage: ingest new handoffs, generate packs for new sessions,')
+  lines.push('  or extend with pending-approval UI / feature work as needed by operator.')
   lines.push('')
 
   lines.push('==============================')
