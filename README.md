@@ -1,8 +1,8 @@
 # Lane-Eco Budget Control System
 
-**Version:** 1.4.0 | **Build Session:** HUB-22 | **Status:** ✅ LIVE-DEPLOYED
+**Version:** 1.5.0 | **Build Session:** HUB-23 | **Status:** ✅ LIVE-DEPLOYED
 
-Internal operational tool for session, lane, ecosystem budget management — with truth-mature Sovereign Source Intake, **persistent D1 storage**, and **secure webhook inbound handler** with WEBHOOK_SECRET validation.
+Internal operational tool for session, lane, ecosystem budget management — with truth-mature Sovereign Source Intake, **persistent D1 storage**, **D1-durable webhook audit log**, and **D1-durable queue audit state** that survive Cloudflare Worker cold starts and instance changes.
 
 ---
 
@@ -98,14 +98,15 @@ Master Architect Context Pack (truth-mature, sovereign-grounded)
 | `/bridge/api/pack` | GET | Master Architect Context Pack (JSON) |
 | `/bridge/api/pack?session=X` | GET | Session-specific pack |
 
-### HUB-22 Webhook + Queue
+### HUB-22/23 Webhook + Queue (D1-Durable)
 | Endpoint | Method | Description |
 |---|---|---|
-| `/sovereign/api/webhook/inbound` | POST | Secure webhook handler (WEBHOOK_SECRET) |
-| `/sovereign/api/webhook/log` | GET | Audit log (no token values) |
-| `/sovereign/api/queue/status` | GET | Batch queue status |
-| `/sovereign/api/queue/process` | POST | Manual queue transition |
-| `/sovereign/api/queue/test` | POST | Controlled E2E test scenario |
+| `/sovereign/api/webhook/inbound` | POST | Secure webhook handler (WEBHOOK_SECRET) + D1 audit |
+| `/sovereign/api/webhook/log` | GET | D1-durable audit log (survives cold starts) |
+| `/sovereign/api/queue/status` | GET | D1-durable queue status |
+| `/sovereign/api/queue/process` | POST | Queue transition (persisted to D1) |
+| `/sovereign/api/queue/audit` | GET | Full D1 durable audit trace (NEW HUB-23) |
+| `/sovereign/api/queue/test` | POST | Controlled E2E test (D1-persisted) |
 
 ---
 
@@ -119,19 +120,23 @@ Master Architect Context Pack (truth-mature, sovereign-grounded)
 | HUB-20 | Persistent D1 storage + boot restore | ✅ LIVE-VERIFIED |
 | HUB-21 | Final truth-layer cleanup + webhook/queue scaffolding | ✅ LIVE-DEPLOYED |
 | HUB-22 | Webhook Secret Hardening + Live Integration | ✅ LIVE-DEPLOYED |
+| HUB-23 | Durable Webhook/Queue Audit + Boot Consistency Fix | ✅ LIVE-DEPLOYED |
 
 ---
 
-## Honest Classification (HUB-22)
+## Honest Classification (HUB-23)
 
-| Component | Classification | Blocker |
+| Component | Classification | Notes |
 |---|---|---|
-| Truth Layer (D1 + boot restore) | ✅ LIVE-VERIFIED | None |
-| Sovereign Source Intake | ✅ LIVE-VERIFIED | None |
-| Webhook handler structure | ✅ STRUCTURE-VERIFIED | None |
-| Token validation (MISSING/INVALID reject) | ✅ LIVE-VERIFIED | None |
-| Token VALIDATED from real external caller | ⚠️ PARTIAL | No external system currently configured to send requests |
-| Batch Queue state machine | ✅ CONTROLLED_VERIFIED | Wired to webhook, awaiting real external event stream |
+| Truth Layer (D1 + boot restore) | ✅ LIVE-VERIFIED | Survives cold boots |
+| Sovereign Source Intake | ✅ LIVE-VERIFIED | P1 auto-restored on boot |
+| Boot consistency (/health vs /summary) | ✅ LIVE-VERIFIED | _globalInitPromise fix |
+| Webhook MISSING_TOKEN reject + D1 audit | ✅ LIVE-VERIFIED | Proven on production |
+| Webhook INVALID_TOKEN reject + D1 audit | ✅ LIVE-VERIFIED | Proven on production |
+| Webhook log durability (cold boot) | ✅ LIVE-VERIFIED | D1 storage_layer confirmed |
+| Queue audit durability (cold boot) | ✅ LIVE-VERIFIED | D1 storage_layer confirmed |
+| Queue full cycle pending→sent | ✅ LOCAL-VERIFIED | E2E + D1 audit proven locally |
+| Token VALIDATED from real external caller | ⚠️ PARTIAL | Needs external caller with prod secret |
 
 **Next Locked Move:**
 1. Configure external system to send `POST /sovereign/api/webhook/inbound` with `X-Webhook-Token: <WEBHOOK_SECRET>`
