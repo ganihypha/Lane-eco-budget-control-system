@@ -1,6 +1,6 @@
 // ============================================================
 // LANE-ECO BUDGET CONTROL SYSTEM — Main Entry Point
-// HUB-22: Webhook Secret Hardening + Live Integration
+// HUB-23: Durable Webhook/Queue Audit + Boot Consistency Fix
 // Internal operational tool: Session/Lane/Ecosystem Budget Control
 // Stack: Hono + TypeScript + Cloudflare Pages + D1
 // ============================================================
@@ -31,18 +31,32 @@ const app = new Hono<{ Bindings: Bindings }>()
 app.use('/static/*', serveStatic({ root: './public' }))
 
 // ─── BOOT INIT MIDDLEWARE ────────────────────────────────────
-// On every first request, initialize D1 adapter and attempt boot restore.
-// Uses a lightweight singleton flag to avoid re-running per request.
+// HUB-23: Atomic boot initialization — prevents first-hit inconsistency.
+// Uses a module-level init promise to ensure all concurrent requests
+// on a cold boot wait for the same D1 restore to complete before serving.
+//
+// Without this: 2 concurrent cold-boot requests could both read
+// _bootStatus='D1 not yet initialized' before either finishes initDB().
+// With this: all requests await the same shared init promise.
+
+let _globalInitPromise: Promise<void> | null = null
 
 app.use('*', async (c, next) => {
-  // Inject SOVEREIGN_DB into the sovereign module on first request
-  // The initSovereignDB call is idempotent — only runs full restore once.
   if (c.env?.SOVEREIGN_DB) {
-    await initSovereignDB(c.env.SOVEREIGN_DB)
+    // HUB-23: Use shared promise — all concurrent cold-boot requests wait for
+    // the same initialization instead of each racing to call initSovereignDB.
+    if (!_globalInitPromise) {
+      _globalInitPromise = initSovereignDB(c.env.SOVEREIGN_DB)
+    }
+    await _globalInitPromise
   }
-  // HUB-22: Forward WEBHOOK_SECRET to request context for sovereign route access
+  // HUB-22: Forward WEBHOOK_SECRET to request context
   if (c.env?.WEBHOOK_SECRET) {
     c.set('WEBHOOK_SECRET' as never, c.env.WEBHOOK_SECRET)
+  }
+  // HUB-23: Forward SOVEREIGN_DB to request context for durable webhook/queue audit
+  if (c.env?.SOVEREIGN_DB) {
+    c.set('SOVEREIGN_DB' as never, c.env.SOVEREIGN_DB)
   }
   await next()
 })
@@ -85,8 +99,8 @@ app.get('/health', async (c) => {
           '/sovereign/api/webhook/inbound', '/sovereign/api/queue/status'
         ]
       },
-      version: '1.4.0',
-      build_session: 'hub22',
+      version: '1.5.0',
+      build_session: 'hub23',
       persistence: bootStatus.storage_mode,
       repo_target: 'https://github.com/ganihypha/Lane-eco-budget-control-system.git',
       // HUB-22: Webhook secret configuration status (never expose actual secret value)
